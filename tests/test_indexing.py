@@ -6,7 +6,7 @@ import pytest
 
 from qatool.cli import main as cli_main
 from qatool.chunking import Chunk
-from qatool.indexing import index_repository
+from qatool.indexing import INDEX_FILE_BATCH_SIZE, index_repository
 from qatool.vectorstore import VectorStore
 
 
@@ -78,6 +78,32 @@ def test_index_repository_batches_embeddings_and_reports_progress(
     assert calls == [["def a():\n    return 'a'\n", "def b():\n    return 'b'\n"]]
     assert "[qatool] indexing 1/2: a.py" in output
     assert "[qatool] indexing 2/2: b.py" in output
+
+
+def test_index_repository_reports_progress_across_batch_boundaries(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    for index in range(INDEX_FILE_BATCH_SIZE + 2):
+        (repo / f"file_{index:02d}.py").write_text(f"def f_{index}():\n    return {index}\n")
+
+    calls: list[list[str]] = []
+
+    def fake_embed_texts(texts: list[str]) -> list[list[float]]:
+        calls.append(list(texts))
+        return [[float(index)] for index, _ in enumerate(texts, start=1)]
+
+    monkeypatch.setattr("qatool.indexing.embed_texts", fake_embed_texts)
+
+    index_repository(repo, VectorStore.open(repo / ".qatool" / "index"))
+
+    output = capsys.readouterr().out
+    assert len(calls) == 2
+    assert f"[qatool] indexing {INDEX_FILE_BATCH_SIZE}/{INDEX_FILE_BATCH_SIZE + 2}" in output
+    assert f"[qatool] indexing {INDEX_FILE_BATCH_SIZE + 1}/{INDEX_FILE_BATCH_SIZE + 2}" in output
+    assert f"[qatool] indexing {INDEX_FILE_BATCH_SIZE + 2}/{INDEX_FILE_BATCH_SIZE + 2}" in output
 
 
 def test_index_repository_removes_deleted_files_from_store(tmp_path):

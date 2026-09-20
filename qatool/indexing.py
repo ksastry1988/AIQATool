@@ -159,8 +159,8 @@ def _index_file_batch(
     indexed_chunks = 0
     deleted_files = 0
 
-    for offset, (rel_path, full_path, new_hash) in enumerate(batch, start=1):
-        print(f"[qatool] indexing {start_index + offset}/{total_files}: {rel_path}")
+    for offset, (rel_path, full_path, new_hash) in enumerate(batch):
+        print(f"[qatool] indexing {start_index + offset + 1}/{total_files}: {rel_path}")
         try:
             chunks = chunk_file(full_path, rel_path)
         except FileNotFoundError:
