@@ -177,7 +177,7 @@ def test_index_repository_continues_after_batch_embedding_failure(
 
     persisted = json.loads((store_path / "store.json").read_text())
     error_output = capsys.readouterr().err
-    assert calls[0] == ["def a():\n    return 'ok'\n", "def bad():\n    return 'bad'\n"]
+    assert calls[0] == ["def good():\n    return 'ok'\n", "def bad():\n    return 'bad'\n"]
     assert set(persisted["file_hashes"]) == {"a.py"}
     assert {chunk["metadata"]["file"] for chunk in persisted["chunks"]} == {"a.py"}
     assert "b.py: failed to index file (provider rejected content)" in error_output
