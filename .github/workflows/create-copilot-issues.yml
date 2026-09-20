@@ -1,0 +1,290 @@
+name: Create Copilot issues
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create-issues:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create issues and hand them to Copilot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          create_issue() {
+            local title="$1"
+            local body="$2"
+
+            # Make the workflow safe to re-run: do not create a duplicate open issue.
+            if gh issue list --repo "$GH_REPO" --state open --search "\\\"$title\\\" in:title" --json title --jq '.[].title' | grep -Fxq "$title"; then
+              echo "Skipping existing issue: $title"
+              return 0
+            fi
+
+            printf '%s\n' "$body" > issue-body.md
+            gh issue create \
+              --repo "$GH_REPO" \
+              --title "$title" \
+              --body-file issue-body.md \
+              --assignee copilot
+          }
+
+          create_issue 'Add package metadata and CLI entry point' '## Summary
+          Add the package configuration required to install qatool and expose the CLI.
+
+          ## Tasks
+          - Add pyproject.toml
+          - Define package metadata and Python version requirements
+          - Add runtime dependencies
+          - Add development/test dependencies
+          - Configure the qatool console script
+          - Verify pip install -e . and qatool --help
+
+          ## Acceptance Criteria
+          - package installs successfully
+          - qatool --help works
+          - test dependencies install through a documented extra'
+
+          create_issue 'Implement the full repository indexing command' '## Summary
+          Implement qatool index <repo> so it walks a repository, chunks files, generates embeddings, and stores the indexed content.
+
+          ## Tasks
+          - Validate repo path
+          - Walk repository recursively
+          - Apply .qatoolignore rules
+          - Skip binaries/generated/secret files
+          - Chunk supported files
+          - Generate embeddings in batches
+          - Store chunks, metadata, and file hashes
+          - Display progress
+          - Handle per-file failures
+
+          ## Acceptance Criteria
+          - qatool index creates a usable local index
+          - ignored files are not indexed
+          - unchanged files are not re-embedded
+          - errors produce actionable messages'
+
+          create_issue 'Implement the embedding provider abstraction' '## Summary
+          Replace the placeholder implementation in qatool/embeddings.py with a configurable embedding provider.
+
+          ## Tasks
+          - Define an embedding provider interface
+          - Select and implement the initial provider
+          - Support configurable model and endpoint settings
+          - Read credentials from env vars
+          - Add batching
+          - Add retry and rate-limit handling
+          - Validate vector count
+          - Add mock provider for tests
+
+          ## Acceptance Criteria
+          - embed_texts() returns one vector per input string
+          - large lists are batched
+          - failures are reported clearly'
+
+          create_issue 'Implement the persistent vector store' '## Summary
+          Replace the placeholder implementation in qatool/vectorstore.py with a persistent local vector store.
+
+          ## Tasks
+          - Select an initial backend
+          - Implement VectorStore.open()
+          - Implement upsert()
+          - Implement query()
+          - Implement delete_by_file()
+          - Implement get_file_hash()
+          - Implement set_file_hash()
+          - Store chunk text and metadata
+          - Add persistence and reopen tests
+
+          ## Acceptance Criteria
+          - indexed data survives restarts
+          - query returns top-k chunks
+          - deleting a file removes its chunks
+          - file hashes can be read and updated'
+
+          create_issue 'Implement the qatool ask retrieval flow' '## Summary
+          Implement the end-to-end question-answering flow.
+
+          ## Tasks
+          - Add repo/index arg to ask command
+          - Embed the user question
+          - Query the vector store for top-k chunks
+          - Add configurable top_k
+          - Format retrieved chunks with metadata
+          - Return messages for missing index or no results
+          - Add a model client abstraction
+          - Send grounded context to the LLM
+          - Return answers with file and line citations
+
+          ## Acceptance Criteria
+          - user can run qatool ask --repo ./repo "..."
+          - answers identify source files and line ranges
+          - answers stay grounded in retrieved context'
+
+          create_issue 'Add exact symbol and filename lookup' '## Summary
+          Add the secondary exact-match retrieval path described in the design doc.
+
+          ## Tasks
+          - Extract identifiers and filenames from questions
+          - Search indexed metadata for matches
+          - Merge exact-match results with vector results
+          - Remove duplicate chunks
+          - Define ranking behavior
+          - Add tests for symbol and filename lookups
+
+          ## Acceptance Criteria
+          - exact symbol queries return symbol chunks
+          - exact matches are included even when semantic similarity is low'
+
+          create_issue 'Improve tree-sitter chunking and language support' '## Summary
+          Make AST-based chunking reliable for supported languages and define fallback behavior.
+
+          ## Tasks
+          - Decide how tree-sitter grammars are installed and loaded
+          - Validate parser compatibility
+          - Add support for Python, JavaScript, TypeScript, Go, Java, Rust, C/C++
+          - Preserve chunk text and line numbers
+          - Handle syntax errors gracefully
+          - Add tests with representative source files
+
+          ## Acceptance Criteria
+          - supported languages use AST-aware chunks
+          - unsupported languages fall back to whole-file chunks'
+
+          create_issue 'Add the .githooks/post-commit hook' '## Summary
+          Add the post-commit hook and connect it to incremental reindexing.
+
+          ## Tasks
+          - Create .githooks/post-commit
+          - Detect repo root
+          - Get changed files from previous commit
+          - Write git diff --name-status output to temp file
+          - Invoke qatool reindex
+          - Make hook executable
+          - Document setup
+
+          ## Acceptance Criteria
+          - hook runs after commit
+          - add/modify/delete/rename changes pass to reindex
+          - missing local index fails clearly'
+
+          create_issue 'Harden incremental reindexing' '## Summary
+          Complete and validate incremental reindexing against real repo changes.
+
+          ## Tasks
+          - Add tests for added/modified/deleted/renamed/unchanged files
+          - Persist indexed commit SHA
+          - Handle empty diffs
+          - Handle paths with spaces and special chars
+          - Batch vector-store deletes and upserts
+          - Improve logging and error reporting
+
+          ## Acceptance Criteria
+          - index accurately reflects file changes
+          - unchanged files are skipped
+          - paths with spaces are handled
+          - failed operations leave index recoverable'
+
+          create_issue 'Add repository ignore and secret exclusion defaults' '## Summary
+          Prevent sensitive and irrelevant files from being ingested by default.
+
+          ## Tasks
+          - Add .qatoolignore.example
+          - Document ignore pattern syntax
+          - Add default exclusions for secrets and generated files
+          - Ensure ignore rules apply to full indexing and reindexing
+          - Add tests for secret-file exclusion
+
+          ## Acceptance Criteria
+          - secret-like files are excluded by default
+          - repo-specific ignore patterns work
+          - indexing and reindexing use the same exclusion rules'
+
+          create_issue 'Add configuration management' '## Summary
+          Centralize provider, model, storage, and retrieval configuration.
+
+          ## Tasks
+          - Add environment-based config
+          - Support optional config files
+          - Define settings for provider/model, vector-store path, top_k
+          - Validate required settings
+          - Avoid logging sensitive values
+          - Document all supported settings
+
+          ## Acceptance Criteria
+          - config is consistent across index/reindex/ask
+          - invalid config yields actionable errors
+          - secrets are never printed'
+
+          create_issue 'Add LLM client and grounded prompt construction' '## Summary
+          Create the LLM integration used to generate cited answers from retrieved code.
+
+          ## Tasks
+          - Define an LLM client interface
+          - Implement the initial Claude-compatible provider
+          - Build a grounded prompt requiring citations
+          - Include chunk metadata in the prompt
+          - Add token/context-size limits
+          - Add mocked tests
+
+          ## Acceptance Criteria
+          - answers cite file paths and line ranges
+          - model is instructed not to fabricate repository details
+          - context is bounded to a configurable size'
+
+          create_issue 'Add integration tests for the complete pipeline' '## Summary
+          Add tests covering the package from indexing through question answering.
+
+          ## Tasks
+          - Create a temporary sample repo fixture
+          - Mock embeddings
+          - Use a test vector store
+          - Mock the LLM
+          - Test indexing, querying, citations, updates, deletes, renames
+          - Run integration tests in CI
+
+          ## Acceptance Criteria
+          - the complete mocked pipeline passes in CI
+          - external services are not required for tests'
+
+          create_issue 'Fix and enforce the coverage workflow' '## Summary
+          Validate that pull requests run the coverage workflow and enforce the configured 70% threshold.
+
+          ## Tasks
+          - Confirm workflow installs all required dependencies
+          - Run coverage against the installed package
+          - Keep --fail-under=70
+          - Ensure coverage.xml is generated
+          - Upload artifacts on success/failure
+          - Add coverage as features land
+
+          ## Acceptance Criteria
+          - PRs targeting main run the workflow
+          - the check fails below 70% coverage
+          - coverage badge reflects workflow status'
+
+          create_issue 'Improve documentation for the MVP' '## Summary
+          Update the README to describe the actual supported workflow once the MVP is complete.
+
+          ## Tasks
+          - Document installation
+          - Document provider credentials
+          - Document full indexing
+          - Document asking questions
+          - Document incremental reindexing
+          - Document hook installation
+          - Document .qatoolignore
+          - Document local index location
+          - Document supported languages and limitations
+
+          ## Acceptance Criteria
+          - a new user can install, configure, index a repo, enable hook, and ask a question using the docs'
