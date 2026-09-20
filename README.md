@@ -31,6 +31,25 @@ qatool index ./path-to-repo
 qatool ask "where does authentication happen"
 ```
 
+## Docker
+
+Build the image from the repository root:
+
+```bash
+docker build -t qatool .
+```
+
+The image runs `qatool --help` by default. Pass a qatool command after the
+image name, and mount the repository being indexed when needed:
+
+```bash
+docker run --rm qatool --help
+docker run --rm -v "$PWD:/workspace" qatool index /workspace
+```
+
+The image contains the package and its runtime dependencies. Persistent
+index data should be stored in the mounted repository's `.qatool` directory.
+
 ## Incremental re-indexing on commit
 
 Enable the included git hook so the index stays fresh automatically:
