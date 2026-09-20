@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.git/
+.github/
+.pytest_cache/
+.coverage
+coverage.xml
+coverage_html/
+.tox/
+
+.qatool/
