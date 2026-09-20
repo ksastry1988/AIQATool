@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import tempfile
 import uuid
 from contextlib import contextmanager
 from io import BufferedRandom
@@ -58,8 +59,16 @@ class VectorStore:
         self._data["chunks"] = list(raw.get("chunks", []))
 
     def _persist(self) -> None:
-        tmp_path = self._store_path.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(self._data, indent=2, sort_keys=True))
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=self.path,
+            prefix=f"{self._store_path.stem}-",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_file:
+            tmp_file.write(json.dumps(self._data, indent=2, sort_keys=True))
+            tmp_path = Path(tmp_file.name)
         tmp_path.replace(self._store_path)
 
     def _acquire_lock(self, lock_file: BufferedRandom) -> None:

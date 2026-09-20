@@ -172,6 +172,10 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
         try:
             chunks = chunk_file(full_path, rel_path)
             vectors = embed_texts([chunk.text for chunk in chunks])
+            if len(vectors) != len(chunks):
+                raise ValueError(
+                    f"embedding count mismatch: expected {len(chunks)}, got {len(vectors)}"
+                )
             store.replace_file(rel_path, new_hash, chunks, vectors)
             indexed_files += 1
             indexed_chunks += len(chunks)
