@@ -184,10 +184,9 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
             errors.append(f"{rel_path}: failed to index file ({exc})")
 
     deleted_files = 0
-    if not errors:
-        for rel_path in stale_files:
-            store.delete_by_file(rel_path)
-        deleted_files = len(stale_files)
+    for rel_path in stale_files:
+        store.delete_by_file(rel_path)
+        deleted_files += 1
 
     if errors:
         for error in errors:

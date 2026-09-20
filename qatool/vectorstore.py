@@ -119,19 +119,19 @@ class VectorStore:
         }
 
     def list_indexed_files(self) -> set[str]:
-        self._load()
-        indexed_files = set(self._data["file_hashes"])
-        indexed_files.update(
-            chunk.get("metadata", {}).get("file")
-            for chunk in self._data["chunks"]
-            if chunk.get("metadata", {}).get("file")
-        )
-        return indexed_files
+        with self._locked():
+            indexed_files = set(self._data["file_hashes"])
+            indexed_files.update(
+                chunk.get("metadata", {}).get("file")
+                for chunk in self._data["chunks"]
+                if chunk.get("metadata", {}).get("file")
+            )
+            return indexed_files
 
     def get_file_hash(self, rel_path: str) -> str | None:
         """Return the last-indexed content hash for a file, if any."""
-        self._load()
-        return self._data["file_hashes"].get(rel_path)
+        with self._locked():
+            return self._data["file_hashes"].get(rel_path)
 
     def snapshot(self) -> dict[str, Any]:
         with self._locked():
@@ -214,29 +214,29 @@ class VectorStore:
         if top_k <= 0:
             return []
 
-        self._load()
-        query_norm = math.sqrt(sum(value * value for value in vector))
-        scored: list[dict[str, Any]] = []
+        with self._locked():
+            query_norm = math.sqrt(sum(value * value for value in vector))
+            scored: list[dict[str, Any]] = []
 
-        for chunk in self._data["chunks"]:
-            chunk_vector = chunk.get("vector", [])
-            if len(chunk_vector) != len(vector):
-                raise ValueError("query vector dimension mismatch")
-            chunk_norm = math.sqrt(sum(value * value for value in chunk_vector))
-            if query_norm == 0.0 or chunk_norm == 0.0:
-                score = 0.0
-            else:
-                score = sum(a * b for a, b in zip(vector, chunk_vector)) / (
-                    query_norm * chunk_norm
+            for chunk in self._data["chunks"]:
+                chunk_vector = chunk.get("vector", [])
+                if len(chunk_vector) != len(vector):
+                    raise ValueError("query vector dimension mismatch")
+                chunk_norm = math.sqrt(sum(value * value for value in chunk_vector))
+                if query_norm == 0.0 or chunk_norm == 0.0:
+                    score = 0.0
+                else:
+                    score = sum(a * b for a, b in zip(vector, chunk_vector)) / (
+                        query_norm * chunk_norm
+                    )
+
+                scored.append(
+                    {
+                        "text": chunk.get("text", ""),
+                        "metadata": dict(chunk.get("metadata", {})),
+                        "score": score,
+                    }
                 )
 
-            scored.append(
-                {
-                    "text": chunk.get("text", ""),
-                    "metadata": dict(chunk.get("metadata", {})),
-                    "score": score,
-                }
-            )
-
-        scored.sort(key=lambda chunk: chunk["score"], reverse=True)
-        return scored[:top_k]
+            scored.sort(key=lambda chunk: chunk["score"], reverse=True)
+            return scored[:top_k]
