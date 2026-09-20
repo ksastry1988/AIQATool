@@ -1,4 +1,4 @@
-name: Create Copilot issues
+name: Create issues
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
   create-issues:
     runs-on: ubuntu-latest
     steps:
-      - name: Create issues and hand them to Copilot
+      - name: Create issues
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -33,8 +33,7 @@ jobs:
             gh issue create \
               --repo "$GH_REPO" \
               --title "$title" \
-              --body-file issue-body.md \
-              --assignee copilot
+              --body-file issue-body.md
           }
 
           create_issue 'Add package metadata and CLI entry point' '## Summary
