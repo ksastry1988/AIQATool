@@ -15,7 +15,11 @@ def cmd_index(args: argparse.Namespace) -> None:
     from .indexing import index_repository, validate_repository_path
     from .vectorstore import VectorStore
 
-    repo = validate_repository_path(args.repo)
+    try:
+        repo = validate_repository_path(args.repo)
+    except ValueError as exc:
+        print(f"[qatool] error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
     store = VectorStore.open(repo / ".qatool" / "index")
     index_repository(repo, store)
 
@@ -58,10 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    try:
-        args.func(args)
-    except ValueError as exc:
-        parser.exit(2, f"[qatool] error: {exc}\n")
+    args.func(args)
 
 
 if __name__ == "__main__":
