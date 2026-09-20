@@ -5,7 +5,7 @@ import hashlib
 import sys
 from pathlib import Path
 
-from .chunking import chunk_file
+from .chunking import Chunk, chunk_file
 from .embeddings import embed_texts
 from .vectorstore import VectorStore
 
@@ -138,7 +138,7 @@ def iter_candidate_files(repo_root: Path, ignore_patterns: set[str]) -> tuple[li
     return candidates, errors
 
 
-def _embed_chunks(chunks) -> list[list[float]]:
+def _embed_chunks(chunks: list[Chunk]) -> list[list[float]]:
     vectors = embed_texts([chunk.text for chunk in chunks])
     if len(vectors) != len(chunks):
         raise ValueError(
