@@ -220,7 +220,6 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
     stale_files = sorted(snapshot["indexed_files"] - set(current_files))
 
     to_process: list[tuple[str, Path, str]] = []
-    unchanged_files: list[tuple[str, Path]] = []
     unchanged = 0
 
     for rel_path, full_path in current_files.items():
@@ -232,7 +231,6 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
 
         if snapshot["file_hashes"].get(rel_path) == new_hash:
             unchanged += 1
-            unchanged_files.append((rel_path, full_path))
             continue
 
         to_process.append((rel_path, full_path, new_hash))
@@ -263,9 +261,14 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
         store.delete_by_file(rel_path)
         deleted_files += 1
 
-    for rel_path, full_path in unchanged_files:
-        if full_path.exists():
-            continue
+    final_candidates, final_errors = iter_candidate_files(repo_root, ignore_patterns)
+    errors.extend(final_errors)
+    final_current_files = {
+        path.relative_to(repo_root).as_posix()
+        for path in sorted(final_candidates)
+    }
+
+    for rel_path in sorted(set(current_files) - final_current_files):
         store.delete_by_file(rel_path)
         deleted_files += 1
 
