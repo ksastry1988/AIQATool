@@ -177,14 +177,6 @@ def _index_file_batch(
     try:
         flattened_chunks = [chunk for _, _, chunks in prepared for chunk in chunks]
         vectors = _embed_chunks(flattened_chunks)
-
-        vector_offset = 0
-        for rel_path, new_hash, chunks in prepared:
-            next_offset = vector_offset + len(chunks)
-            store.replace_file(rel_path, new_hash, chunks, vectors[vector_offset:next_offset])
-            indexed_files += 1
-            indexed_chunks += len(chunks)
-            vector_offset = next_offset
     except Exception:
         for rel_path, new_hash, chunks in prepared:
             try:
@@ -193,6 +185,18 @@ def _index_file_batch(
                 indexed_chunks += len(chunks)
             except Exception as exc:  # pragma: no cover - defensive boundary
                 errors.append(f"{rel_path}: failed to index file ({exc})")
+        return indexed_files, indexed_chunks, deleted_files
+
+    vector_offset = 0
+    for rel_path, new_hash, chunks in prepared:
+        next_offset = vector_offset + len(chunks)
+        try:
+            store.replace_file(rel_path, new_hash, chunks, vectors[vector_offset:next_offset])
+            indexed_files += 1
+            indexed_chunks += len(chunks)
+        except Exception as exc:  # pragma: no cover - defensive boundary
+            errors.append(f"{rel_path}: failed to index file ({exc})")
+        vector_offset = next_offset
 
     return indexed_files, indexed_chunks, deleted_files
 
