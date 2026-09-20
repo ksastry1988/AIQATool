@@ -32,7 +32,7 @@ jobs:
         run: python -m coverage run -m pytest
 
       - name: Report coverage
-        run: python -m coverage report --fail-under=0
+        run: python -m coverage report --fail-under=70
 
       - name: Generate XML coverage report
         run: python -m coverage xml
