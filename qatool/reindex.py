@@ -14,7 +14,6 @@ Usage (invoked by the hook):
 from __future__ import annotations
 
 import argparse
-import hashlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,10 +21,8 @@ from pathlib import Path
 # Swap these for your real implementations.
 from .chunking import chunk_file          # tree-sitter based, function/class-level chunks
 from .embeddings import embed_texts       # batched embedding calls
+from .indexing import file_hash, load_ignore_patterns, should_index
 from .vectorstore import VectorStore      # thin wrapper around Chroma/LanceDB/etc.
-
-IGNORED_SUFFIXES = {".lock", ".png", ".jpg", ".svg", ".pyc", ".min.js"}
-IGNORE_FILE = ".qatoolignore"
 
 
 @dataclass
@@ -50,33 +47,6 @@ def parse_diff_output(diff_text: str) -> list[FileChange]:
     return changes
 
 
-def load_ignore_patterns(repo_root: Path) -> set[str]:
-    ignore_path = repo_root / IGNORE_FILE
-    if not ignore_path.exists():
-        return set()
-    return {
-        line.strip()
-        for line in ignore_path.read_text().splitlines()
-        if line.strip() and not line.startswith("#")
-    }
-
-
-def should_index(path: Path, ignore_patterns: set[str]) -> bool:
-    if path.suffix in IGNORED_SUFFIXES:
-        return False
-    posix = path.as_posix()
-    for pattern in ignore_patterns:
-        if path.match(pattern) or pattern in posix:
-            return False
-    return True
-
-
-def file_hash(path: Path) -> str:
-    """Content hash, used to skip re-embedding files whose content is
-    unchanged (e.g. a rename with no edits, or a no-op merge)."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> None:
     ignore_patterns = load_ignore_patterns(repo_root)
 
@@ -97,7 +67,7 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
 
         if not full_path.exists():
             continue  # file was deleted after the diff was captured
-        if not should_index(full_path, ignore_patterns):
+        if not should_index(full_path, repo_root, ignore_patterns):
             continue
 
         added_or_modified.append(full_path)
@@ -123,18 +93,31 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
     # 3. Drop old chunks for files that changed, then re-chunk + re-embed.
     all_chunks = []
     for rel_path, full_path, new_hash in to_process:
-        store.delete_by_file(rel_path)
         chunks = chunk_file(full_path, rel_path)  # -> list[Chunk(text, metadata)]
-        all_chunks.extend(chunks)
-        store.set_file_hash(rel_path, new_hash)
+        all_chunks.append((rel_path, chunks, new_hash))
 
-    if all_chunks:
-        vectors = embed_texts([c.text for c in all_chunks])
-        store.upsert(chunks=all_chunks, vectors=vectors)
+    total_chunks = sum(len(chunks) for _, chunks, _ in all_chunks)
+    chunk_groups = [chunks for _, chunks, _ in all_chunks if chunks]
+    if chunk_groups:
+        flattened_chunks = [chunk for chunks in chunk_groups for chunk in chunks]
+        vectors = embed_texts([chunk.text for chunk in flattened_chunks])
+        if len(vectors) != len(flattened_chunks):
+            raise ValueError(
+                f"embedding count mismatch: expected {len(flattened_chunks)}, got {len(vectors)}"
+            )
+
+        offset = 0
+        for rel_path, chunks, new_hash in all_chunks:
+            chunk_vectors = vectors[offset:offset + len(chunks)]
+            store.replace_file(rel_path, new_hash, chunks, chunk_vectors)
+            offset += len(chunks)
+    else:
+        for rel_path, chunks, new_hash in all_chunks:
+            store.replace_file(rel_path, new_hash, chunks, [])
 
     print(
         f"[qatool] reindexed {len(to_process)} file(s), "
-        f"{len(all_chunks)} chunk(s), {len(deleted)} deletion(s) applied"
+        f"{total_chunks} chunk(s), {len(deleted)} deletion(s) applied"
     )
 
 
