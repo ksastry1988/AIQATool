@@ -93,18 +93,31 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
     # 3. Drop old chunks for files that changed, then re-chunk + re-embed.
     all_chunks = []
     for rel_path, full_path, new_hash in to_process:
-        store.delete_by_file(rel_path)
         chunks = chunk_file(full_path, rel_path)  # -> list[Chunk(text, metadata)]
-        all_chunks.extend(chunks)
-        store.set_file_hash(rel_path, new_hash)
+        all_chunks.append((rel_path, chunks, new_hash))
 
-    if all_chunks:
-        vectors = embed_texts([c.text for c in all_chunks])
-        store.upsert(chunks=all_chunks, vectors=vectors)
+    total_chunks = sum(len(chunks) for _, chunks, _ in all_chunks)
+    chunk_groups = [chunks for _, chunks, _ in all_chunks if chunks]
+    if chunk_groups:
+        flattened_chunks = [chunk for chunks in chunk_groups for chunk in chunks]
+        vectors = embed_texts([chunk.text for chunk in flattened_chunks])
+        if len(vectors) != len(flattened_chunks):
+            raise ValueError(
+                f"embedding count mismatch: expected {len(flattened_chunks)}, got {len(vectors)}"
+            )
+
+        offset = 0
+        for rel_path, chunks, new_hash in all_chunks:
+            chunk_vectors = vectors[offset:offset + len(chunks)]
+            store.replace_file(rel_path, new_hash, chunks, chunk_vectors)
+            offset += len(chunks)
+    else:
+        for rel_path, chunks, new_hash in all_chunks:
+            store.replace_file(rel_path, new_hash, chunks, [])
 
     print(
         f"[qatool] reindexed {len(to_process)} file(s), "
-        f"{len(all_chunks)} chunk(s), {len(deleted)} deletion(s) applied"
+        f"{total_chunks} chunk(s), {len(deleted)} deletion(s) applied"
     )
 
 

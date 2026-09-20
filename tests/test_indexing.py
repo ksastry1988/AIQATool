@@ -149,3 +149,24 @@ def test_vector_store_multiple_instances_preserve_writes(tmp_path):
     reopened = VectorStore.open(store_path)
     assert reopened.get_file_hash("a.py") == "hash-a"
     assert reopened.get_file_hash("b.py") == "hash-b"
+
+
+def test_vector_store_replace_file_updates_chunks_and_hash_atomically(tmp_path):
+    store = VectorStore.open(tmp_path / "index")
+    store.replace_file(
+        "a.py",
+        "hash-a",
+        [Chunk(text="alpha", metadata={"file": "a.py"})],
+        [[1.0]],
+    )
+    store.replace_file(
+        "a.py",
+        "hash-b",
+        [Chunk(text="beta", metadata={"file": "a.py"})],
+        [[2.0]],
+    )
+
+    reopened = VectorStore.open(tmp_path / "index")
+    persisted = json.loads((tmp_path / "index" / "store.json").read_text())
+    assert reopened.get_file_hash("a.py") == "hash-b"
+    assert [chunk["text"] for chunk in persisted["chunks"]] == ["beta"]

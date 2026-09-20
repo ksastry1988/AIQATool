@@ -8,13 +8,23 @@ simplest for a local/single-repo setup.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import math
 import uuid
 from contextlib import contextmanager
+from io import BufferedRandom
 from pathlib import Path
 from typing import Any
+
+try:  # pragma: no cover - import path depends on platform
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
+
+try:  # pragma: no cover - import path depends on platform
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    msvcrt = None
 
 
 class VectorStore:
@@ -52,16 +62,46 @@ class VectorStore:
         tmp_path.write_text(json.dumps(self._data, indent=2, sort_keys=True))
         tmp_path.replace(self._store_path)
 
+    def _acquire_lock(self, lock_file: BufferedRandom) -> None:
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            return
+
+        if msvcrt is not None:
+            if self._lock_path.stat().st_size == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            return
+
+    def _release_lock(self, lock_file: BufferedRandom) -> None:
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            return
+
+        if msvcrt is not None:
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+
     @contextmanager
     def _locked(self):
         self.path.mkdir(parents=True, exist_ok=True)
-        with self._lock_path.open("a+") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        with self._lock_path.open("a+b") as lock_file:
+            self._acquire_lock(lock_file)
             try:
                 self._load()
                 yield
             finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                self._release_lock(lock_file)
+
+    def _chunk_record(self, chunk: Any, vector: list[float]) -> dict[str, Any]:
+        return {
+            "id": str(uuid.uuid4()),
+            "text": chunk.text,
+            "metadata": dict(chunk.metadata),
+            "vector": vector,
+        }
 
     def list_indexed_files(self) -> set[str]:
         self._load()
@@ -115,15 +155,30 @@ class VectorStore:
             ]
 
             for chunk, vector in zip(chunks, vectors):
-                self._data["chunks"].append(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "text": chunk.text,
-                        "metadata": dict(chunk.metadata),
-                        "vector": vector,
-                    }
-                )
+                self._data["chunks"].append(self._chunk_record(chunk, vector))
 
+            self._persist()
+
+    def replace_file(
+        self,
+        rel_path: str,
+        new_hash: str,
+        chunks: list[Any],
+        vectors: list[list[float]],
+    ) -> None:
+        if len(chunks) != len(vectors):
+            raise ValueError("chunk/vector count mismatch")
+
+        replacement_chunks = [self._chunk_record(chunk, vector) for chunk, vector in zip(chunks, vectors)]
+
+        with self._locked():
+            self._data["chunks"] = [
+                chunk
+                for chunk in self._data["chunks"]
+                if chunk.get("metadata", {}).get("file") != rel_path
+            ]
+            self._data["chunks"].extend(replacement_chunks)
+            self._data["file_hashes"][rel_path] = new_hash
             self._persist()
 
     def query(self, vector: list[float], top_k: int = 8) -> list[Any]:
