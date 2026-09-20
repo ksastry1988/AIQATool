@@ -1,5 +1,7 @@
 # qatool
 
+[![Coverage](https://github.com/ksastry1988/AIQATool/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/ksastry1988/AIQATool/actions/workflows/coverage.yml)
+
 A codebase Q&A agent: index a repository and ask natural-language
 questions about it ("where does rate limiting happen", "trace how a
 request flows through auth"), answered by Claude grounded in
@@ -52,3 +54,17 @@ repo you index, and adjust the patterns.
 pip install -e ".[test]"
 pytest
 ```
+
+## Code coverage
+
+Coverage is configured in `.coveragerc`. Install the coverage tool and run the
+same test suite with branch coverage enabled:
+
+```bash
+pip install coverage
+coverage run -m pytest
+coverage report
+coverage html  # Open coverage_html/index.html for the detailed report
+```
+
+The commands also produce `coverage.xml` for CI or coverage-reporting services.
