@@ -83,6 +83,21 @@ def test_vector_store_persists_and_queries_chunks(tmp_path):
     assert results[0]["text"] == "alpha"
 
 
+def test_vector_store_upsert_replaces_existing_file_chunks(tmp_path):
+    store = VectorStore.open(tmp_path / "index")
+    store.upsert(
+        [Chunk(text="alpha", metadata={"file": "a.py"})],
+        [[1.0]],
+    )
+    store.upsert(
+        [Chunk(text="beta", metadata={"file": "a.py"})],
+        [[2.0]],
+    )
+
+    persisted = json.loads((tmp_path / "index" / "store.json").read_text())
+    assert [chunk["text"] for chunk in persisted["chunks"]] == ["beta"]
+
+
 def test_index_repository_preserves_previous_data_when_embeddings_are_invalid(
     tmp_path, monkeypatch
 ):
@@ -121,3 +136,16 @@ def test_vector_store_rejects_query_dimension_mismatches(tmp_path):
         assert "dimension mismatch" in str(exc)
     else:  # pragma: no cover - assertion branch
         raise AssertionError("expected query to reject mismatched vector dimensions")
+
+
+def test_vector_store_multiple_instances_preserve_writes(tmp_path):
+    store_path = tmp_path / "index"
+    primary = VectorStore.open(store_path)
+    secondary = VectorStore.open(store_path)
+
+    primary.set_file_hash("a.py", "hash-a")
+    secondary.set_file_hash("b.py", "hash-b")
+
+    reopened = VectorStore.open(store_path)
+    assert reopened.get_file_hash("a.py") == "hash-a"
+    assert reopened.get_file_hash("b.py") == "hash-b"

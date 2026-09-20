@@ -143,8 +143,6 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
     }
 
     stale_files = sorted(store.list_indexed_files() - set(current_files))
-    for rel_path in stale_files:
-        store.delete_by_file(rel_path)
 
     to_process: list[tuple[str, Path, str]] = []
     unchanged = 0
@@ -187,12 +185,18 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
         except Exception as exc:  # pragma: no cover - defensive boundary
             errors.append(f"{rel_path}: failed to index file ({exc})")
 
+    deleted_files = 0
+    if not errors:
+        for rel_path in stale_files:
+            store.delete_by_file(rel_path)
+        deleted_files = len(stale_files)
+
     if errors:
         for error in errors:
             print(f"[qatool] {error}", file=sys.stderr)
 
     print(
         f"[qatool] indexed {indexed_files} file(s), "
-        f"{indexed_chunks} chunk(s), {len(stale_files)} deletion(s), "
+        f"{indexed_chunks} chunk(s), {deleted_files} deletion(s), "
         f"{len(errors)} error(s)"
     )

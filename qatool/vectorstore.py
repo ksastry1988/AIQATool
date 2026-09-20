@@ -8,9 +8,11 @@ simplest for a local/single-repo setup.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import math
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,7 @@ class VectorStore:
     def __init__(self, path: Path):
         self.path = path
         self._store_path = path / self.STORE_FILENAME
+        self._lock_path = path / f"{self.STORE_FILENAME}.lock"
         self._data: dict[str, Any] = {
             "file_hashes": {},
             "chunks": [],
@@ -33,6 +36,10 @@ class VectorStore:
         return cls(path)
 
     def _load(self) -> None:
+        self._data = {
+            "file_hashes": {},
+            "chunks": [],
+        }
         if not self._store_path.exists():
             return
 
@@ -45,7 +52,19 @@ class VectorStore:
         tmp_path.write_text(json.dumps(self._data, indent=2, sort_keys=True))
         tmp_path.replace(self._store_path)
 
+    @contextmanager
+    def _locked(self):
+        self.path.mkdir(parents=True, exist_ok=True)
+        with self._lock_path.open("a+") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                self._load()
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
     def list_indexed_files(self) -> set[str]:
+        self._load()
         indexed_files = set(self._data["file_hashes"])
         indexed_files.update(
             chunk.get("metadata", {}).get("file")
@@ -56,45 +75,63 @@ class VectorStore:
 
     def get_file_hash(self, rel_path: str) -> str | None:
         """Return the last-indexed content hash for a file, if any."""
+        self._load()
         return self._data["file_hashes"].get(rel_path)
 
     def set_file_hash(self, rel_path: str, new_hash: str) -> None:
         """Record the content hash used for a file's current chunks."""
-        self._data["file_hashes"][rel_path] = new_hash
-        self._persist()
+        with self._locked():
+            self._data["file_hashes"][rel_path] = new_hash
+            self._persist()
 
     def delete_by_file(self, rel_path: str) -> None:
         """Remove all chunks previously indexed for this file."""
-        chunks = [
-            chunk
-            for chunk in self._data["chunks"]
-            if chunk.get("metadata", {}).get("file") != rel_path
-        ]
-        self._data["chunks"] = chunks
-        self._data["file_hashes"].pop(rel_path, None)
-        self._persist()
+        with self._locked():
+            chunks = [
+                chunk
+                for chunk in self._data["chunks"]
+                if chunk.get("metadata", {}).get("file") != rel_path
+            ]
+            self._data["chunks"] = chunks
+            self._data["file_hashes"].pop(rel_path, None)
+            self._persist()
 
     def upsert(self, chunks: list[Any], vectors: list[list[float]]) -> None:
         """Insert or update chunks with their embedding vectors."""
         if len(chunks) != len(vectors):
             raise ValueError("chunk/vector count mismatch")
 
-        for chunk, vector in zip(chunks, vectors):
-            self._data["chunks"].append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "text": chunk.text,
-                    "metadata": dict(chunk.metadata),
-                    "vector": vector,
-                }
-            )
-        self._persist()
+        updated_files = {
+            chunk.metadata.get("file")
+            for chunk in chunks
+            if chunk.metadata.get("file")
+        }
+
+        with self._locked():
+            self._data["chunks"] = [
+                chunk
+                for chunk in self._data["chunks"]
+                if chunk.get("metadata", {}).get("file") not in updated_files
+            ]
+
+            for chunk, vector in zip(chunks, vectors):
+                self._data["chunks"].append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "text": chunk.text,
+                        "metadata": dict(chunk.metadata),
+                        "vector": vector,
+                    }
+                )
+
+            self._persist()
 
     def query(self, vector: list[float], top_k: int = 8) -> list[Any]:
         """Return the top_k most similar chunks to the query vector."""
         if top_k <= 0:
             return []
 
+        self._load()
         query_norm = math.sqrt(sum(value * value for value in vector))
         scored: list[dict[str, Any]] = []
 
