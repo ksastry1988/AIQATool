@@ -267,8 +267,9 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
         path.relative_to(repo_root).as_posix()
         for path in sorted(final_candidates)
     }
+    final_error_paths = {error.split(":", 1)[0] for error in final_errors}
 
-    for rel_path in sorted(set(current_files) - final_current_files):
+    for rel_path in sorted(set(current_files) - final_current_files - final_error_paths):
         store.delete_by_file(rel_path)
         deleted_files += 1
 
