@@ -12,8 +12,11 @@ from pathlib import Path
 
 
 def cmd_index(args: argparse.Namespace) -> None:
-    # TODO: walk repo, chunk every file, embed, build vector store from scratch
-    print(f"[qatool] full index of {args.repo} — not yet implemented")
+    from .indexing import index_repository
+    from .vectorstore import VectorStore
+
+    store = VectorStore.open(args.repo / ".qatool" / "index")
+    index_repository(args.repo, store)
 
 
 def cmd_reindex(args: argparse.Namespace) -> None:
