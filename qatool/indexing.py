@@ -142,7 +142,8 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
         for path in sorted(candidates)
     }
 
-    stale_files = sorted(store.list_indexed_files() - set(current_files))
+    snapshot = store.snapshot()
+    stale_files = sorted(snapshot["indexed_files"] - set(current_files))
 
     to_process: list[tuple[str, Path, str]] = []
     unchanged = 0
@@ -154,7 +155,7 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
             errors.append(f"{rel_path}: failed to read file ({exc})")
             continue
 
-        if store.get_file_hash(rel_path) == new_hash:
+        if snapshot["file_hashes"].get(rel_path) == new_hash:
             unchanged += 1
             continue
 

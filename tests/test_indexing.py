@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from qatool.chunking import Chunk
 from qatool.indexing import index_repository
@@ -170,3 +171,24 @@ def test_vector_store_replace_file_updates_chunks_and_hash_atomically(tmp_path):
     persisted = json.loads((tmp_path / "index" / "store.json").read_text())
     assert reopened.get_file_hash("a.py") == "hash-b"
     assert [chunk["text"] for chunk in persisted["chunks"]] == ["beta"]
+
+
+def test_vector_store_cleans_temp_files_when_replace_fails(tmp_path, monkeypatch):
+    store = VectorStore.open(tmp_path / "index")
+    original_replace = Path.replace
+
+    def failing_replace(self, target):
+        if self.suffix == ".tmp":
+            raise OSError("replace failed")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+
+    try:
+        store.set_file_hash("a.py", "hash-a")
+    except OSError:
+        pass
+    else:  # pragma: no cover - assertion branch
+        raise AssertionError("expected replace failure")
+
+    assert list((tmp_path / "index").glob("*.tmp")) == []

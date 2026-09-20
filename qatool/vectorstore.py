@@ -59,6 +59,7 @@ class VectorStore:
         self._data["chunks"] = list(raw.get("chunks", []))
 
     def _persist(self) -> None:
+        tmp_path: Path | None = None
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -69,7 +70,12 @@ class VectorStore:
         ) as tmp_file:
             tmp_file.write(json.dumps(self._data, indent=2, sort_keys=True))
             tmp_path = Path(tmp_file.name)
-        tmp_path.replace(self._store_path)
+        try:
+            tmp_path.replace(self._store_path)
+        except Exception:
+            if tmp_path.exists():
+                tmp_path.unlink()
+            raise
 
     def _acquire_lock(self, lock_file: BufferedRandom) -> None:
         if fcntl is not None:
@@ -126,6 +132,19 @@ class VectorStore:
         """Return the last-indexed content hash for a file, if any."""
         self._load()
         return self._data["file_hashes"].get(rel_path)
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._locked():
+            indexed_files = set(self._data["file_hashes"])
+            indexed_files.update(
+                chunk.get("metadata", {}).get("file")
+                for chunk in self._data["chunks"]
+                if chunk.get("metadata", {}).get("file")
+            )
+            return {
+                "file_hashes": dict(self._data["file_hashes"]),
+                "indexed_files": indexed_files,
+            }
 
     def set_file_hash(self, rel_path: str, new_hash: str) -> None:
         """Record the content hash used for a file's current chunks."""
