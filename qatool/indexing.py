@@ -169,8 +169,13 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
 
     indexed_files = 0
     indexed_chunks = 0
+    deleted_files = 0
     for rel_path, full_path, new_hash in to_process:
         try:
+            if not full_path.exists():
+                store.delete_by_file(rel_path)
+                deleted_files += 1
+                continue
             chunks = chunk_file(full_path, rel_path)
             vectors = embed_texts([chunk.text for chunk in chunks])
             if len(vectors) != len(chunks):
@@ -180,10 +185,12 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
             store.replace_file(rel_path, new_hash, chunks, vectors)
             indexed_files += 1
             indexed_chunks += len(chunks)
+        except FileNotFoundError:
+            store.delete_by_file(rel_path)
+            deleted_files += 1
         except Exception as exc:  # pragma: no cover - defensive boundary
             errors.append(f"{rel_path}: failed to index file ({exc})")
 
-    deleted_files = 0
     for rel_path in stale_files:
         store.delete_by_file(rel_path)
         deleted_files += 1
