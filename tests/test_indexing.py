@@ -122,6 +122,34 @@ def test_index_repository_removes_deleted_files_from_store(tmp_path):
     assert persisted["chunks"] == []
 
 
+def test_index_repository_removes_unchanged_files_deleted_during_processing(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    unchanged_path = repo / "a.py"
+    changed_path = repo / "b.py"
+    unchanged_path.write_text("def keep():\n    return 1\n")
+    changed_path.write_text("def change():\n    return 1\n")
+
+    store_path = repo / ".qatool" / "index"
+    index_repository(repo, VectorStore.open(store_path))
+
+    changed_path.write_text("def change():\n    return 2\n")
+
+    def deleting_embed_texts(texts: list[str]) -> list[list[float]]:
+        unchanged_path.unlink()
+        return [[1.0] for _ in texts]
+
+    monkeypatch.setattr("qatool.indexing.embed_texts", deleting_embed_texts)
+
+    index_repository(repo, VectorStore.open(store_path))
+
+    persisted = json.loads((store_path / "store.json").read_text())
+    assert set(persisted["file_hashes"]) == {"b.py"}
+    assert {chunk["metadata"]["file"] for chunk in persisted["chunks"]} == {"b.py"}
+
+
 def test_vector_store_persists_and_queries_chunks(tmp_path):
     store = VectorStore.open(tmp_path / "index")
     store.upsert(
