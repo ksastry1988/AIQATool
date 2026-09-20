@@ -1,6 +1,10 @@
 import json
+import sys
 from pathlib import Path
 
+import pytest
+
+from qatool.cli import main as cli_main
 from qatool.chunking import Chunk
 from qatool.indexing import index_repository
 from qatool.vectorstore import VectorStore
@@ -50,6 +54,30 @@ def test_index_repository_skips_unchanged_files_on_repeat_runs(tmp_path, monkeyp
     output = capsys.readouterr().out
     assert len(calls) == 1
     assert "1 unchanged" in output
+
+
+def test_index_repository_batches_embeddings_and_reports_progress(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def a():\n    return 'a'\n")
+    (repo / "b.py").write_text("def b():\n    return 'b'\n")
+
+    calls: list[list[str]] = []
+
+    def fake_embed_texts(texts: list[str]) -> list[list[float]]:
+        calls.append(list(texts))
+        return [[float(index)] for index, _ in enumerate(texts, start=1)]
+
+    monkeypatch.setattr("qatool.indexing.embed_texts", fake_embed_texts)
+
+    index_repository(repo, VectorStore.open(repo / ".qatool" / "index"))
+
+    output = capsys.readouterr().out
+    assert calls == [["def a():\n    return 'a'\n", "def b():\n    return 'b'\n"]]
+    assert "[qatool] indexing 1/2: a.py" in output
+    assert "[qatool] indexing 2/2: b.py" in output
 
 
 def test_index_repository_removes_deleted_files_from_store(tmp_path):
@@ -124,6 +152,37 @@ def test_index_repository_preserves_previous_data_when_embeddings_are_invalid(
     assert current == previous
 
 
+def test_index_repository_continues_after_batch_embedding_failure(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def good():\n    return 'ok'\n")
+    (repo / "b.py").write_text("def bad():\n    return 'bad'\n")
+
+    calls: list[list[str]] = []
+
+    def flaky_embed_texts(texts: list[str]) -> list[list[float]]:
+        calls.append(list(texts))
+        if len(texts) > 1:
+            raise RuntimeError("batch provider outage")
+        if "bad" in texts[0]:
+            raise RuntimeError("provider rejected content")
+        return [[1.0]]
+
+    monkeypatch.setattr("qatool.indexing.embed_texts", flaky_embed_texts)
+
+    store_path = repo / ".qatool" / "index"
+    index_repository(repo, VectorStore.open(store_path))
+
+    persisted = json.loads((store_path / "store.json").read_text())
+    error_output = capsys.readouterr().err
+    assert calls[0] == ["def a():\n    return 'ok'\n", "def bad():\n    return 'bad'\n"]
+    assert set(persisted["file_hashes"]) == {"a.py"}
+    assert {chunk["metadata"]["file"] for chunk in persisted["chunks"]} == {"a.py"}
+    assert "b.py: failed to index file (provider rejected content)" in error_output
+
+
 def test_vector_store_rejects_query_dimension_mismatches(tmp_path):
     store = VectorStore.open(tmp_path / "index")
     store.upsert(
@@ -192,3 +251,17 @@ def test_vector_store_cleans_temp_files_when_replace_fails(tmp_path, monkeypatch
         raise AssertionError("expected replace failure")
 
     assert list((tmp_path / "index").glob("*.tmp")) == []
+
+
+def test_cli_index_rejects_missing_repository_without_creating_store(
+    tmp_path, monkeypatch, capsys
+):
+    missing_repo = tmp_path / "missing-repo"
+    monkeypatch.setattr(sys, "argv", ["qatool", "index", str(missing_repo)])
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main()
+
+    assert exc_info.value.code == 2
+    assert f"repository does not exist: {missing_repo}" in capsys.readouterr().err
+    assert not missing_repo.exists()

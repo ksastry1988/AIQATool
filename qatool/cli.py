@@ -12,11 +12,12 @@ from pathlib import Path
 
 
 def cmd_index(args: argparse.Namespace) -> None:
-    from .indexing import index_repository
+    from .indexing import index_repository, validate_repository_path
     from .vectorstore import VectorStore
 
-    store = VectorStore.open(args.repo / ".qatool" / "index")
-    index_repository(args.repo, store)
+    repo = validate_repository_path(args.repo)
+    store = VectorStore.open(repo / ".qatool" / "index")
+    index_repository(repo, store)
 
 
 def cmd_reindex(args: argparse.Namespace) -> None:
@@ -57,7 +58,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except ValueError as exc:
+        parser.exit(2, f"[qatool] error: {exc}\n")
 
 
 if __name__ == "__main__":

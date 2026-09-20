@@ -22,6 +22,7 @@ IGNORED_DIRECTORIES = {
     "node_modules",
 }
 IGNORE_FILE = ".qatoolignore"
+INDEX_FILE_BATCH_SIZE = 32
 SECRET_FILENAMES = {
     ".env",
     ".env.local",
@@ -111,6 +112,14 @@ def file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def validate_repository_path(repo_root: Path) -> Path:
+    if not repo_root.exists():
+        raise ValueError(f"repository does not exist: {repo_root}")
+    if not repo_root.is_dir():
+        raise ValueError(f"repository path is not a directory: {repo_root}")
+    return repo_root
+
+
 def iter_candidate_files(repo_root: Path, ignore_patterns: set[str]) -> tuple[list[Path], list[str]]:
     candidates: list[Path] = []
     errors: list[str] = []
@@ -129,11 +138,67 @@ def iter_candidate_files(repo_root: Path, ignore_patterns: set[str]) -> tuple[li
     return candidates, errors
 
 
+def _embed_chunks(chunks) -> list[list[float]]:
+    vectors = embed_texts([chunk.text for chunk in chunks])
+    if len(vectors) != len(chunks):
+        raise ValueError(
+            f"embedding count mismatch: expected {len(chunks)}, got {len(vectors)}"
+        )
+    return vectors
+
+
+def _index_file_batch(
+    batch: list[tuple[str, Path, str]],
+    store: VectorStore,
+    errors: list[str],
+    start_index: int,
+    total_files: int,
+) -> tuple[int, int, int]:
+    prepared: list[tuple[str, str, list]] = []
+    indexed_files = 0
+    indexed_chunks = 0
+    deleted_files = 0
+
+    for offset, (rel_path, full_path, new_hash) in enumerate(batch, start=1):
+        print(f"[qatool] indexing {start_index + offset}/{total_files}: {rel_path}")
+        try:
+            chunks = chunk_file(full_path, rel_path)
+        except FileNotFoundError:
+            store.delete_by_file(rel_path)
+            deleted_files += 1
+        except Exception as exc:  # pragma: no cover - defensive boundary
+            errors.append(f"{rel_path}: failed to index file ({exc})")
+        else:
+            prepared.append((rel_path, new_hash, chunks))
+
+    if not prepared:
+        return indexed_files, indexed_chunks, deleted_files
+
+    try:
+        flattened_chunks = [chunk for _, _, chunks in prepared for chunk in chunks]
+        vectors = _embed_chunks(flattened_chunks)
+
+        vector_offset = 0
+        for rel_path, new_hash, chunks in prepared:
+            next_offset = vector_offset + len(chunks)
+            store.replace_file(rel_path, new_hash, chunks, vectors[vector_offset:next_offset])
+            indexed_files += 1
+            indexed_chunks += len(chunks)
+            vector_offset = next_offset
+    except Exception:
+        for rel_path, new_hash, chunks in prepared:
+            try:
+                store.replace_file(rel_path, new_hash, chunks, _embed_chunks(chunks))
+                indexed_files += 1
+                indexed_chunks += len(chunks)
+            except Exception as exc:  # pragma: no cover - defensive boundary
+                errors.append(f"{rel_path}: failed to index file ({exc})")
+
+    return indexed_files, indexed_chunks, deleted_files
+
+
 def index_repository(repo_root: Path, store: VectorStore) -> None:
-    if not repo_root.exists():
-        raise ValueError(f"repository does not exist: {repo_root}")
-    if not repo_root.is_dir():
-        raise ValueError(f"repository path is not a directory: {repo_root}")
+    repo_root = validate_repository_path(repo_root)
 
     ignore_patterns = load_ignore_patterns(repo_root)
     candidates, errors = iter_candidate_files(repo_root, ignore_patterns)
@@ -170,26 +235,18 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
     indexed_files = 0
     indexed_chunks = 0
     deleted_files = 0
-    for rel_path, full_path, new_hash in to_process:
-        try:
-            if not full_path.exists():
-                store.delete_by_file(rel_path)
-                deleted_files += 1
-                continue
-            chunks = chunk_file(full_path, rel_path)
-            vectors = embed_texts([chunk.text for chunk in chunks])
-            if len(vectors) != len(chunks):
-                raise ValueError(
-                    f"embedding count mismatch: expected {len(chunks)}, got {len(vectors)}"
-                )
-            store.replace_file(rel_path, new_hash, chunks, vectors)
-            indexed_files += 1
-            indexed_chunks += len(chunks)
-        except FileNotFoundError:
-            store.delete_by_file(rel_path)
-            deleted_files += 1
-        except Exception as exc:  # pragma: no cover - defensive boundary
-            errors.append(f"{rel_path}: failed to index file ({exc})")
+    for start in range(0, len(to_process), INDEX_FILE_BATCH_SIZE):
+        batch = to_process[start:start + INDEX_FILE_BATCH_SIZE]
+        batch_indexed_files, batch_indexed_chunks, batch_deleted_files = _index_file_batch(
+            batch,
+            store,
+            errors,
+            start,
+            len(to_process),
+        )
+        indexed_files += batch_indexed_files
+        indexed_chunks += batch_indexed_chunks
+        deleted_files += batch_deleted_files
 
     for rel_path in stale_files:
         store.delete_by_file(rel_path)
