@@ -100,6 +100,8 @@ class VectorStore:
 
         for chunk in self._data["chunks"]:
             chunk_vector = chunk.get("vector", [])
+            if len(chunk_vector) != len(vector):
+                raise ValueError("query vector dimension mismatch")
             chunk_norm = math.sqrt(sum(value * value for value in chunk_vector))
             if query_norm == 0.0 or chunk_norm == 0.0:
                 score = 0.0

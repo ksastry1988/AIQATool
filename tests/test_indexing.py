@@ -81,3 +81,43 @@ def test_vector_store_persists_and_queries_chunks(tmp_path):
     assert reopened.get_file_hash("a.py") == "hash-a"
     assert results[0]["metadata"]["file"] == "a.py"
     assert results[0]["text"] == "alpha"
+
+
+def test_index_repository_preserves_previous_data_when_embeddings_are_invalid(
+    tmp_path, monkeypatch
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    file_path = repo / "keep.py"
+    file_path.write_text("def keep():\n    return 1\n")
+
+    store_path = repo / ".qatool" / "index"
+    index_repository(repo, VectorStore.open(store_path))
+    previous = json.loads((store_path / "store.json").read_text())
+
+    file_path.write_text("def keep():\n    return 2\n")
+
+    def invalid_embed_texts(texts: list[str]) -> list[list[float]]:
+        return [[1.0] for _ in texts[:-1]]
+
+    monkeypatch.setattr("qatool.indexing.embed_texts", invalid_embed_texts)
+
+    index_repository(repo, VectorStore.open(store_path))
+
+    current = json.loads((store_path / "store.json").read_text())
+    assert current == previous
+
+
+def test_vector_store_rejects_query_dimension_mismatches(tmp_path):
+    store = VectorStore.open(tmp_path / "index")
+    store.upsert(
+        [Chunk(text="alpha", metadata={"file": "a.py"})],
+        [[1.0, 0.0]],
+    )
+
+    try:
+        store.query([1.0], top_k=1)
+    except ValueError as exc:
+        assert "dimension mismatch" in str(exc)
+    else:  # pragma: no cover - assertion branch
+        raise AssertionError("expected query to reject mismatched vector dimensions")
