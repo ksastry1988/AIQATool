@@ -206,6 +206,7 @@ def test_index_repository_continues_after_batch_embedding_failure(
     assert calls[0] == ["def good():\n    return 'ok'\n", "def bad():\n    return 'bad'\n"]
     assert set(persisted["file_hashes"]) == {"a.py"}
     assert {chunk["metadata"]["file"] for chunk in persisted["chunks"]} == {"a.py"}
+    assert "batch embedding failed for 2 file(s); retrying individually" in error_output
     assert "b.py: failed to index file (provider rejected content)" in error_output
 
 

@@ -177,7 +177,12 @@ def _index_file_batch(
     try:
         flattened_chunks = [chunk for _, _, chunks in prepared for chunk in chunks]
         vectors = _embed_chunks(flattened_chunks)
-    except Exception:
+    except Exception as exc:
+        print(
+            f"[qatool] batch embedding failed for {len(prepared)} file(s); "
+            f"retrying individually ({exc})",
+            file=sys.stderr,
+        )
         for rel_path, new_hash, chunks in prepared:
             try:
                 store.replace_file(rel_path, new_hash, chunks, _embed_chunks(chunks))
