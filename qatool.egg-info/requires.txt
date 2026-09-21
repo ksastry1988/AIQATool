@@ -1,0 +1,5 @@
+tree-sitter>=0.21.0
+
+[test]
+pytest>=8.0
+coverage[toml]>=7.0
