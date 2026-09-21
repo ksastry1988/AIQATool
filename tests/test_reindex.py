@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from qatool.chunking import Chunk
 from qatool.reindex import main as reindex_main
 from qatool.reindex import parse_diff_output
+from qatool.reindex import reindex
+from qatool.vectorstore import VectorStore
 
 
 def test_parse_diff_output_handles_add_modify_delete():
@@ -29,6 +32,29 @@ def test_parse_diff_output_handles_rename():
     assert changes[0].status == "R"
     assert changes[0].path == "old_name.py"
     assert changes[0].new_path == "new_name.py"
+
+
+def test_reindex_deduplicates_overlapping_changed_paths(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tracked.py").write_text("print('one')\n")
+
+    calls: list[str] = []
+
+    def fake_chunk_file(full_path: Path, rel_path: str):
+        calls.append(rel_path)
+        return [Chunk(text=full_path.read_text(), metadata={"file": rel_path})]
+
+    monkeypatch.setattr("qatool.reindex.chunk_file", fake_chunk_file)
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    reindex(
+        repo,
+        parse_diff_output("M\ttracked.py\nM\ttracked.py\n"),
+        VectorStore.open(repo / ".qatool" / "index"),
+    )
+
+    assert calls == ["tracked.py"]
 
 
 def _run_git(repo: Path, *args: str, cwd: Path | None = None, env: dict[str, str] | None = None):

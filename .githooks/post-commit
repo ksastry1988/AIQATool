@@ -27,12 +27,14 @@ while IFS= read -r parent; do
 done <"$parent_file"
 
 if [ "$#" -gt 0 ]; then
-  base=$(git -C "$repo_root" merge-base --octopus "$@")
+  : >"$diff_file"
+  for parent in "$@"; do
+    git -C "$repo_root" diff --name-status -M "$parent" HEAD >>"$diff_file"
+  done
 else
   base=$(git -C "$repo_root" hash-object -t tree /dev/null)
+  git -C "$repo_root" diff --name-status -M "$base" HEAD >"$diff_file"
 fi
-
-git -C "$repo_root" diff --name-status -M "$base" HEAD >"$diff_file"
 
 if [ ! -s "$diff_file" ]; then
   exit 0
