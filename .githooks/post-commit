@@ -74,7 +74,7 @@ for raw_line in raw_diff_path.read_text().splitlines():
         if old_path not in delete_seen:
             events.append(("delete", old_path))
             delete_seen.add(old_path)
-        record = (status_token, old_path, new_path)
+        record = (status, status_token, old_path, new_path)
         target = new_path
     else:
         path = parts[1]
@@ -86,13 +86,13 @@ for raw_line in raw_diff_path.read_text().splitlines():
         upsert_seen.add(target)
 
     existing = present.get(target)
-    if existing is None or priorities[status] > priorities[existing[0][0]]:
+    if existing is None or priorities[status] > priorities[existing[0]]:
         present[target] = record
 
 rename_old_paths = {
-    record[1]
+    record[2]
     for record in present.values()
-    if record[0].startswith("R")
+    if record[0] == "R"
 }
 present_targets = set(present)
 output_lines: list[str] = []
@@ -115,8 +115,8 @@ for kind, key in events:
     if record is None:
         continue
 
-    if record[0].startswith("R"):
-        output_lines.append(f"{record[0]}\t{record[1]}\t{record[2]}")
+    if record[0] == "R":
+        output_lines.append(f"{record[1]}\t{record[2]}\t{record[3]}")
     elif key in deleted:
         output_lines.append(f"M\t{key}")
     else:
