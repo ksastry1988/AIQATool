@@ -23,7 +23,7 @@ git -C "$repo_root" show \
   --diff-merges=separate \
   --root \
   -M \
-  HEAD | sort -u >"$diff_file"
+  HEAD | awk '!seen[$0]++' >"$diff_file"
 
 if [ ! -s "$diff_file" ]; then
   exit 0
