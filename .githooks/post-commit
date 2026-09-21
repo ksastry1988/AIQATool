@@ -31,6 +31,7 @@ if [ "$#" -gt 0 ]; then
   : >"$raw_diff_file"
   for parent in "$@"; do
     git -C "$repo_root" diff --name-status -M "$parent" HEAD >>"$raw_diff_file"
+    printf '\n' >>"$raw_diff_file"
   done
 else
   git -C "$repo_root" diff-tree --root --no-commit-id --name-status -r -M HEAD >"$raw_diff_file"
