@@ -57,14 +57,20 @@ def test_reindex_deduplicates_overlapping_changed_paths(tmp_path, monkeypatch):
     assert calls == ["tracked.py"]
 
 
-def _run_git(repo: Path, *args: str, cwd: Path | None = None, env: dict[str, str] | None = None):
+def _run_git(
+    repo: Path,
+    *args: str,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+):
     return subprocess.run(
         ["git", *args],
         cwd=cwd or repo,
         env=env,
         text=True,
         capture_output=True,
-        check=True,
+        check=check,
     )
 
 
@@ -201,6 +207,51 @@ def test_post_commit_hook_uses_first_parent_merge_diff(tmp_path):
     assert "A\tfeature_only.txt" in diff_lines
     assert "A\tmain_only.txt" not in diff_lines
     assert "M\tshared.txt" in diff_lines
+
+
+def test_post_commit_hook_handles_resolved_merge_commits(tmp_path):
+    repo, env, argv_capture, diff_capture = _setup_hooked_repo(tmp_path)
+
+    (repo / "shared.txt").write_text("base\n")
+    _run_git(repo, "add", "shared.txt")
+    _run_git(repo, "commit", "-m", "base", env=env)
+
+    _run_git(repo, "checkout", "-b", "feature")
+    (repo / "shared.txt").write_text("base\nfeature\n")
+    _run_git(repo, "add", "shared.txt")
+    _run_git(repo, "commit", "-m", "feature change", env=env)
+
+    _run_git(repo, "checkout", "master")
+    (repo / "shared.txt").write_text("base\nmain\n")
+    _run_git(repo, "add", "shared.txt")
+    _run_git(repo, "commit", "-m", "main change", env=env)
+
+    merge_result = _run_git(
+        repo,
+        "merge",
+        "--no-commit",
+        "--no-ff",
+        "feature",
+        env=env,
+        check=False,
+    )
+    assert merge_result.returncode != 0
+
+    (repo / "shared.txt").write_text("base\nmain\nfeature\n")
+    _run_git(repo, "add", "shared.txt")
+    _run_git(repo, "commit", "-m", "resolve merge", env=env)
+
+    argv = json.loads(argv_capture.read_text())
+    diff_lines = diff_capture.read_text().splitlines()
+
+    assert argv == [
+        "reindex",
+        "--repo",
+        str(repo.resolve()),
+        "--changed-files",
+        argv[4],
+    ]
+    assert diff_lines == ["M\tshared.txt"]
 
 
 def test_reindex_main_requires_existing_local_index(tmp_path, monkeypatch, capsys):
