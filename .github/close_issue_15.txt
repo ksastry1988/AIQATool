@@ -1,0 +1,1 @@
+Closing issue via API integration with PR #30
