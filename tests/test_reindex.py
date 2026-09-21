@@ -159,7 +159,8 @@ def test_post_commit_hook_merges_changes_from_all_parents(tmp_path):
     _run_git(repo, "add", "main_only.txt")
     _run_git(repo, "commit", "-m", "main change", env=env)
 
-    _run_git(repo, "merge", "--no-ff", "feature", "-m", "merge feature", env=env)
+    _run_git(repo, "merge", "--no-commit", "--no-ff", "feature", env=env)
+    _run_git(repo, "commit", "-m", "merge feature", env=env)
 
     argv = json.loads(argv_capture.read_text())
     diff_lines = diff_capture.read_text().splitlines()
