@@ -59,6 +59,7 @@ for raw_line in raw_diff_path.read_text().splitlines():
     parts = line.split("\t")
     status_token = parts[0]
     status = status_token[0]
+    normalized_status = status if status in priorities else "M"
 
     if status == "D":
         path = parts[1]
@@ -74,11 +75,11 @@ for raw_line in raw_diff_path.read_text().splitlines():
         if old_path not in delete_seen:
             events.append(("delete", old_path))
             delete_seen.add(old_path)
-        record = (status, status_token, old_path, new_path)
+        record = (normalized_status, status_token, old_path, new_path)
         target = new_path
     else:
         path = parts[1]
-        record = (status, path)
+        record = (normalized_status, path)
         target = path
 
     if target not in upsert_seen:
@@ -86,7 +87,7 @@ for raw_line in raw_diff_path.read_text().splitlines():
         upsert_seen.add(target)
 
     existing = present.get(target)
-    if existing is None or priorities[status] > priorities[existing[0]]:
+    if existing is None or priorities[normalized_status] > priorities[existing[0]]:
         present[target] = record
 
 rename_old_paths = {
