@@ -21,7 +21,12 @@ from pathlib import Path
 # Swap these for your real implementations.
 from .chunking import chunk_file          # tree-sitter based, function/class-level chunks
 from .embeddings import embed_texts       # batched embedding calls
-from .indexing import file_hash, load_ignore_patterns, should_index
+from .indexing import (
+    file_hash,
+    load_ignore_patterns,
+    should_index,
+    validate_repository_path,
+)
 from .vectorstore import VectorStore      # thin wrapper around Chroma/LanceDB/etc.
 
 
@@ -121,6 +126,15 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
     )
 
 
+def require_existing_index(repo_root: Path) -> Path:
+    index_path = repo_root / ".qatool" / "index" / VectorStore.STORE_FILENAME
+    if not index_path.exists():
+        raise ValueError(
+            f"local index not found at {index_path}; run `qatool index {repo_root}` first"
+        )
+    return index_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True, type=Path)
@@ -131,14 +145,20 @@ def main() -> None:
         help="Path to a file containing `git diff --name-status` output",
     )
     args = parser.parse_args()
+    try:
+        repo_root = validate_repository_path(args.repo)
+        require_existing_index(repo_root)
+        diff_text = args.changed_files.read_text()
+    except (OSError, ValueError) as exc:
+        print(f"[qatool] error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
-    diff_text = args.changed_files.read_text()
     changes = parse_diff_output(diff_text)
     if not changes:
         sys.exit(0)
 
-    store = VectorStore.open(args.repo / ".qatool" / "index")
-    reindex(args.repo, changes, store)
+    store = VectorStore.open(repo_root / ".qatool" / "index")
+    reindex(repo_root, changes, store)
 
 
 if __name__ == "__main__":
