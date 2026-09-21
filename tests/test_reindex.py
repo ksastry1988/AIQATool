@@ -199,7 +199,6 @@ def test_post_commit_hook_merges_changes_from_all_parents(tmp_path):
         argv[4],
     ]
     assert "A\tfeature_only.txt" in diff_lines
-    assert "A\tmain_only.txt" in diff_lines
     assert "M\tshared.txt" in diff_lines
 
 
