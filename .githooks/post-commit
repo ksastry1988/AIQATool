@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "[qatool] error: unable to determine repository root" >&2
+  exit 1
+}
+
+if ! command -v qatool >/dev/null 2>&1; then
+  echo "[qatool] error: qatool command not found; install the package first" >&2
+  exit 1
+fi
+
+diff_file=$(mktemp "${TMPDIR:-/tmp}/qatool-post-commit.XXXXXX")
+cleanup() {
+  rm -f "$diff_file"
+}
+trap cleanup EXIT INT TERM
+
+parent_count=$(git -C "$repo_root" show -s --format=%P HEAD | wc -w | tr -d ' ')
+
+if [ "$parent_count" -eq 0 ]; then
+  git -C "$repo_root" diff-tree --root --no-commit-id --name-status -r -M HEAD >"$diff_file"
+elif [ "$parent_count" -eq 1 ]; then
+  git -C "$repo_root" diff --name-status -M HEAD^..HEAD >"$diff_file"
+else
+  git -C "$repo_root" diff-tree --diff-merges=first-parent --no-commit-id --name-status -r -M HEAD >"$diff_file"
+fi
+
+if [ ! -s "$diff_file" ]; then
+  exit 0
+fi
+
+qatool reindex --repo "$repo_root" --changed-files "$diff_file"

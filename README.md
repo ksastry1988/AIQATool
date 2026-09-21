@@ -52,15 +52,24 @@ index data should be stored in the mounted repository's `.qatool` directory.
 
 ## Incremental re-indexing on commit
 
-Enable the included git hook so the index stays fresh automatically:
+Initialize the local index first, then enable the included git hook so it
+stays fresh automatically:
 
 ```bash
+qatool index /path/to/repo
 git config core.hooksPath .githooks
 ```
 
 This runs `.githooks/post-commit` after every commit/merge, which
 diffs the changed files and re-embeds only those (see
 `qatool/reindex.py`).
+
+The hook invokes `qatool reindex --repo <repo> --changed-files <temp-file>`
+using the current commit's `git diff --name-status` output. For merge
+commits, it diffs the merge result against the first parent so only newly
+introduced merge changes are reindexed. If the local index file
+`.qatool/index/store.json` does not exist yet, reindexing fails with a
+clear message telling you to run `qatool index` first.
 
 ## Ignoring files
 
