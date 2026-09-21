@@ -7,10 +7,12 @@ import json
 import math
 import os
 import re
+import socket
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from numbers import Real
 from typing import Protocol
 
 
@@ -53,6 +55,13 @@ class EmbeddingConfig:
     mock_dimension: int
 
 
+@dataclass(frozen=True)
+class EmbeddingRuntimeConfig:
+    batch_size: int
+    max_retries: int
+    retry_base_delay_seconds: float
+
+
 def _read_int_env(name: str, default: int, minimum: int = 1) -> int:
     raw_value = os.getenv(name)
     if raw_value is None:
@@ -76,6 +85,8 @@ def _read_float_env(name: str, default: float, minimum: float = 0.0) -> float:
         value = float(raw_value)
     except ValueError as exc:
         raise EmbeddingError(f"invalid float for {name}: {raw_value!r}") from exc
+    if not math.isfinite(value):
+        raise EmbeddingError(f"{name} must be finite, got {raw_value!r}")
     if value < minimum:
         raise EmbeddingError(f"{name} must be >= {minimum}, got {value}")
     return value
@@ -97,6 +108,18 @@ def load_embedding_config() -> EmbeddingConfig:
         ),
         timeout_seconds=_read_float_env("QATOOL_EMBEDDING_TIMEOUT_SECONDS", 30.0, minimum=0.1),
         mock_dimension=_read_int_env("QATOOL_MOCK_EMBEDDING_DIMENSION", DEFAULT_MOCK_DIMENSION),
+    )
+
+
+def load_embedding_runtime_config() -> EmbeddingRuntimeConfig:
+    return EmbeddingRuntimeConfig(
+        batch_size=_read_int_env("QATOOL_EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE),
+        max_retries=_read_int_env("QATOOL_EMBEDDING_MAX_RETRIES", DEFAULT_MAX_RETRIES, minimum=0),
+        retry_base_delay_seconds=_read_float_env(
+            "QATOOL_EMBEDDING_RETRY_BASE_DELAY_SECONDS",
+            DEFAULT_RETRY_BASE_DELAY_SECONDS,
+            minimum=0.0,
+        ),
     )
 
 
@@ -148,6 +171,8 @@ class VoyageEmbeddingProvider:
         self.timeout_seconds = timeout_seconds
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
         payload = json.dumps({"input": texts, "model": self.model}).encode("utf-8")
         request = urllib.request.Request(
             self.endpoint,
@@ -172,7 +197,18 @@ class VoyageEmbeddingProvider:
                 raise EmbeddingTransientError(message) from exc
             raise EmbeddingError(message) from exc
         except urllib.error.URLError as exc:
-            raise EmbeddingTransientError(f"Voyage request failed: {exc.reason}") from exc
+            transient_reasons = (
+                TimeoutError,
+                socket.timeout,
+                ConnectionResetError,
+                ConnectionAbortedError,
+                BrokenPipeError,
+            )
+            if isinstance(exc.reason, transient_reasons):
+                raise EmbeddingTransientError(f"Voyage request failed: {exc.reason}") from exc
+            raise EmbeddingError(f"Voyage request failed: {exc.reason}") from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise EmbeddingTransientError("Voyage request timed out") from exc
 
         try:
             decoded = json.loads(body.decode("utf-8"))
@@ -193,7 +229,14 @@ class VoyageEmbeddingProvider:
             index = item.get("index", fallback_index)
             if not isinstance(index, int) or index < 0 or index >= len(vectors):
                 raise EmbeddingError("Voyage response item has invalid index")
-            vectors[index] = [float(value) for value in vector]
+            if vectors[index] is not None:
+                raise EmbeddingError(f"Voyage response contains duplicate index {index}")
+            normalized: list[float] = []
+            for value in vector:
+                if isinstance(value, bool) or not isinstance(value, Real):
+                    raise EmbeddingError("Voyage response item contains non-numeric embedding value")
+                normalized.append(float(value))
+            vectors[index] = normalized
 
         if any(vector is None for vector in vectors):
             raise EmbeddingError("Voyage response did not include all embedding vectors")
@@ -254,9 +297,10 @@ def _embed_batch_with_retries(
         except Exception as exc:  # pragma: no cover - defensive boundary
             raise EmbeddingError(f"embedding provider failed unexpectedly: {exc}") from exc
 
-    raise EmbeddingError(
-        f"embedding request failed after {attempts} attempt(s): {last_error}"
-    ) from last_error
+    message = f"embedding request failed after {attempts} attempt(s): {last_error}"
+    if isinstance(last_error, (EmbeddingRateLimitError, EmbeddingTransientError)):
+        raise type(last_error)(message) from last_error
+    raise EmbeddingError(message) from last_error
 
 
 def embed_texts(texts: list[str], provider: EmbeddingProvider | None = None) -> list[list[float]]:
@@ -264,17 +308,26 @@ def embed_texts(texts: list[str], provider: EmbeddingProvider | None = None) -> 
     if not texts:
         return []
 
-    config = load_embedding_config()
-    active_provider = provider or get_embedding_provider(config)
+    if provider is None:
+        config = load_embedding_config()
+        active_provider = get_embedding_provider(config)
+        runtime_config = EmbeddingRuntimeConfig(
+            batch_size=config.batch_size,
+            max_retries=config.max_retries,
+            retry_base_delay_seconds=config.retry_base_delay_seconds,
+        )
+    else:
+        active_provider = provider
+        runtime_config = load_embedding_runtime_config()
     vectors: list[list[float]] = []
 
-    for start in range(0, len(texts), config.batch_size):
-        batch = texts[start:start + config.batch_size]
+    for start in range(0, len(texts), runtime_config.batch_size):
+        batch = texts[start:start + runtime_config.batch_size]
         batch_vectors = _embed_batch_with_retries(
             active_provider,
             batch,
-            max_retries=config.max_retries,
-            retry_base_delay_seconds=config.retry_base_delay_seconds,
+            max_retries=runtime_config.max_retries,
+            retry_base_delay_seconds=runtime_config.retry_base_delay_seconds,
         )
         if len(batch_vectors) != len(batch):
             raise EmbeddingError(
