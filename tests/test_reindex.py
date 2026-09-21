@@ -167,7 +167,7 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
     assert any(line.startswith("R") and line.endswith("\told_name.py\tnew_name.py") for line in second_diff)
 
 
-def test_post_commit_hook_merges_changes_from_all_parents(tmp_path):
+def test_post_commit_hook_uses_first_parent_merge_diff(tmp_path):
     repo, env, argv_capture, diff_capture = _setup_hooked_repo(tmp_path)
 
     (repo / "shared.txt").write_text("base\n")
@@ -199,6 +199,7 @@ def test_post_commit_hook_merges_changes_from_all_parents(tmp_path):
         argv[4],
     ]
     assert "A\tfeature_only.txt" in diff_lines
+    assert "A\tmain_only.txt" not in diff_lines
     assert "M\tshared.txt" in diff_lines
 
 
