@@ -1,9 +1,9 @@
 """
-Thin wrapper around a vector database (Chroma, LanceDB, Qdrant, etc.)
-so the rest of the codebase doesn't depend on any one library's API.
+Persistent local vector store wrapper.
 
-TODO: implement against your chosen backend. Chroma or LanceDB are the
-simplest for a local/single-repo setup.
+The implementation keeps the rest of the codebase isolated from the storage
+details while persisting indexed chunks and file hashes under a repo-local
+`.qatool/index/store.json` file.
 """
 
 from __future__ import annotations

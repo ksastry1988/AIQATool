@@ -166,6 +166,49 @@ def test_vector_store_persists_and_queries_chunks(tmp_path):
     assert results[0]["text"] == "alpha"
 
 
+def test_vector_store_query_returns_ranked_top_k_results(tmp_path):
+    store = VectorStore.open(tmp_path / "index")
+    store.upsert(
+        [
+            Chunk(text="alpha", metadata={"file": "a.py"}),
+            Chunk(text="beta", metadata={"file": "b.py"}),
+            Chunk(text="gamma", metadata={"file": "c.py"}),
+        ],
+        [
+            [1.0, 0.0],
+            [0.8, 0.2],
+            [0.0, 1.0],
+        ],
+    )
+
+    reopened = VectorStore.open(tmp_path / "index")
+    results = reopened.query([1.0, 0.0], top_k=2)
+
+    assert [result["text"] for result in results] == ["alpha", "beta"]
+    assert results[0]["score"] >= results[1]["score"]
+
+
+def test_vector_store_delete_by_file_removes_chunks_and_hash(tmp_path):
+    store = VectorStore.open(tmp_path / "index")
+    store.upsert(
+        [
+            Chunk(text="alpha", metadata={"file": "a.py"}),
+            Chunk(text="beta", metadata={"file": "b.py"}),
+        ],
+        [[1.0], [2.0]],
+    )
+    store.set_file_hash("a.py", "hash-a")
+    store.set_file_hash("b.py", "hash-b")
+
+    store.delete_by_file("a.py")
+
+    reopened = VectorStore.open(tmp_path / "index")
+    persisted = json.loads((tmp_path / "index" / "store.json").read_text())
+    assert reopened.get_file_hash("a.py") is None
+    assert reopened.get_file_hash("b.py") == "hash-b"
+    assert [chunk["metadata"]["file"] for chunk in persisted["chunks"]] == ["b.py"]
+
+
 def test_vector_store_upsert_replaces_existing_file_chunks(tmp_path):
     store = VectorStore.open(tmp_path / "index")
     store.upsert(
