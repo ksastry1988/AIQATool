@@ -21,11 +21,8 @@ parent_count=$(git -C "$repo_root" show -s --format=%P HEAD | wc -w | tr -d ' ')
 
 if [ "$parent_count" -eq 0 ]; then
   git -C "$repo_root" diff-tree --root --no-commit-id --name-status -r -M HEAD >"$diff_file"
-elif [ "$parent_count" -eq 1 ]; then
-  git -C "$repo_root" diff-tree --no-commit-id --name-status -r -M HEAD >"$diff_file"
 else
-  first_parent=$(git -C "$repo_root" rev-parse --verify HEAD^1)
-  git -C "$repo_root" diff --name-status -M "$first_parent" HEAD >"$diff_file"
+  git -C "$repo_root" diff-tree --diff-merges=first-parent --no-commit-id --name-status -r -M HEAD >"$diff_file"
 fi
 
 if [ ! -s "$diff_file" ]; then
