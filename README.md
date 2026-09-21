@@ -9,11 +9,11 @@ retrieved, language-aware code chunks.
 
 ## Status
 
-Skeleton / work in progress. Core pieces are stubbed with `TODO`s:
+Skeleton / work in progress. Some core pieces are still stubbed with `TODO`s:
 
 - `qatool/chunking.py` — tree-sitter based, function/class-level chunking
 - `qatool/embeddings.py` — embedding provider (Voyage AI recommended)
-- `qatool/vectorstore.py` — vector DB wrapper (Chroma / LanceDB / Qdrant)
+- `qatool/vectorstore.py` — implemented persistent local vector store
 - `qatool/cli.py` — `index` and `ask` commands
 - `qatool/reindex.py` — incremental re-indexing (implemented), used by
   the git hook below
