@@ -12,11 +12,16 @@ from pathlib import Path
 
 
 def cmd_index(args: argparse.Namespace) -> None:
-    from .indexing import index_repository
+    from .indexing import index_repository, validate_repository_path
     from .vectorstore import VectorStore
 
-    store = VectorStore.open(args.repo / ".qatool" / "index")
-    index_repository(args.repo, store)
+    try:
+        repo = validate_repository_path(args.repo)
+    except ValueError as exc:
+        print(f"[qatool] error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    store = VectorStore.open(repo / ".qatool" / "index")
+    index_repository(repo, store)
 
 
 def cmd_reindex(args: argparse.Namespace) -> None:
