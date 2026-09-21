@@ -42,7 +42,7 @@ def _run_git(repo: Path, *args: str, cwd: Path | None = None, env: dict[str, str
     )
 
 
-def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_path):
+def _setup_hooked_repo(tmp_path: Path) -> tuple[Path, dict[str, str], Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
     _run_git(repo, "init")
@@ -94,6 +94,11 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     env["QATOOL_HOOK_ARGV_CAPTURE"] = str(argv_capture)
     env["QATOOL_HOOK_DIFF_CAPTURE"] = str(diff_capture)
+    return repo, env, argv_capture, diff_capture
+
+
+def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_path):
+    repo, env, argv_capture, diff_capture = _setup_hooked_repo(tmp_path)
 
     (repo / "tracked.py").write_text("print('one')\n")
     (repo / "old_name.py").write_text("print('old')\n")
@@ -134,6 +139,41 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
     assert "M\ttracked.py" in second_diff
     assert "D\tremoved.txt" in second_diff
     assert any(line.startswith("R") and line.endswith("\told_name.py\tnew_name.py") for line in second_diff)
+
+
+def test_post_commit_hook_merges_changes_from_all_parents(tmp_path):
+    repo, env, argv_capture, diff_capture = _setup_hooked_repo(tmp_path)
+
+    (repo / "shared.txt").write_text("base\n")
+    _run_git(repo, "add", "shared.txt")
+    _run_git(repo, "commit", "-m", "base", env=env)
+
+    _run_git(repo, "checkout", "-b", "feature")
+    (repo / "feature_only.txt").write_text("feature\n")
+    (repo / "shared.txt").write_text("base\nfeature\n")
+    _run_git(repo, "add", "feature_only.txt", "shared.txt")
+    _run_git(repo, "commit", "-m", "feature change", env=env)
+
+    _run_git(repo, "checkout", "master")
+    (repo / "main_only.txt").write_text("main\n")
+    _run_git(repo, "add", "main_only.txt")
+    _run_git(repo, "commit", "-m", "main change", env=env)
+
+    _run_git(repo, "merge", "--no-ff", "feature", "-m", "merge feature", env=env)
+
+    argv = json.loads(argv_capture.read_text())
+    diff_lines = diff_capture.read_text().splitlines()
+
+    assert argv == [
+        "reindex",
+        "--repo",
+        str(repo.resolve()),
+        "--changed-files",
+        argv[4],
+    ]
+    assert "A\tfeature_only.txt" in diff_lines
+    assert "A\tmain_only.txt" in diff_lines
+    assert "M\tshared.txt" in diff_lines
 
 
 def test_reindex_main_requires_existing_local_index(tmp_path, monkeypatch, capsys):

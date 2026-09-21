@@ -17,13 +17,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-git -C "$repo_root" show \
-  --format= \
-  --name-status \
-  --diff-merges=separate \
-  --root \
-  -M \
-  HEAD | awk '!seen[$0]++' >"$diff_file"
+parents=$(git -C "$repo_root" show -s --format=%P HEAD)
+if [ -n "$parents" ]; then
+  base=$(git -C "$repo_root" merge-base --octopus $parents)
+else
+  base=$(git -C "$repo_root" hash-object -t tree /dev/null)
+fi
+
+git -C "$repo_root" diff --name-status -M "$base" HEAD >"$diff_file"
 
 if [ ! -s "$diff_file" ]; then
   exit 0
