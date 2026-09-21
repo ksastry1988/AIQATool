@@ -17,11 +17,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if git -C "$repo_root" rev-parse --verify --quiet HEAD^ >/dev/null; then
-  git -C "$repo_root" diff --name-status -M HEAD^ HEAD >"$diff_file"
-else
-  git -C "$repo_root" diff-tree --root --no-commit-id --name-status -r -M HEAD >"$diff_file"
-fi
+git -C "$repo_root" show \
+  --format= \
+  --name-status \
+  --diff-merges=separate \
+  --root \
+  -M \
+  HEAD | sort -u >"$diff_file"
 
 if [ ! -s "$diff_file" ]; then
   exit 0
