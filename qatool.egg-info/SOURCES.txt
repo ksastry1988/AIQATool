@@ -14,5 +14,6 @@ qatool.egg-info/entry_points.txt
 qatool.egg-info/requires.txt
 qatool.egg-info/top_level.txt
 tests/test_chunking.py
+tests/test_embeddings.py
 tests/test_indexing.py
 tests/test_reindex.py
