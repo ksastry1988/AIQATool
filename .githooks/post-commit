@@ -12,14 +12,22 @@ if ! command -v qatool >/dev/null 2>&1; then
 fi
 
 diff_file=$(mktemp "${TMPDIR:-/tmp}/qatool-post-commit.XXXXXX")
+parent_file=$(mktemp "${TMPDIR:-/tmp}/qatool-post-commit-parents.XXXXXX")
 cleanup() {
-  rm -f "$diff_file"
+  rm -f "$diff_file" "$parent_file"
 }
 trap cleanup EXIT INT TERM
 
-parents=$(git -C "$repo_root" show -s --format=%P HEAD)
-if [ -n "$parents" ]; then
-  base=$(git -C "$repo_root" merge-base --octopus $parents)
+git -C "$repo_root" show -s --format=%P HEAD | tr ' ' '\n' >"$parent_file"
+set --
+while IFS= read -r parent; do
+  if [ -n "$parent" ]; then
+    set -- "$@" "$parent"
+  fi
+done <"$parent_file"
+
+if [ "$#" -gt 0 ]; then
+  base=$(git -C "$repo_root" merge-base --octopus "$@")
 else
   base=$(git -C "$repo_root" hash-object -t tree /dev/null)
 fi
