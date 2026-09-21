@@ -12,9 +12,10 @@ if ! command -v qatool >/dev/null 2>&1; then
 fi
 
 diff_file=$(mktemp "${TMPDIR:-/tmp}/qatool-post-commit.XXXXXX")
+raw_diff_file=$(mktemp "${TMPDIR:-/tmp}/qatool-post-commit-raw.XXXXXX")
 parent_file=$(mktemp "${TMPDIR:-/tmp}/qatool-post-commit-parents.XXXXXX")
 cleanup() {
-  rm -f "$diff_file" "$parent_file"
+  rm -f "$diff_file" "$raw_diff_file" "$parent_file"
 }
 trap cleanup EXIT INT TERM
 
@@ -27,14 +28,103 @@ while IFS= read -r parent; do
 done <"$parent_file"
 
 if [ "$#" -gt 0 ]; then
-  : >"$diff_file"
+  : >"$raw_diff_file"
   for parent in "$@"; do
-    git -C "$repo_root" diff --name-status -M "$parent" HEAD >>"$diff_file"
+    git -C "$repo_root" diff --name-status -M "$parent" HEAD >>"$raw_diff_file"
   done
 else
   base=$(git -C "$repo_root" hash-object -t tree /dev/null)
-  git -C "$repo_root" diff --name-status -M "$base" HEAD >"$diff_file"
+  git -C "$repo_root" diff --name-status -M "$base" HEAD >"$raw_diff_file"
 fi
+
+python3 - "$raw_diff_file" "$diff_file" <<'PY'
+from pathlib import Path
+import sys
+
+raw_diff_path = Path(sys.argv[1])
+diff_path = Path(sys.argv[2])
+
+priorities = {"R": 3, "M": 2, "A": 1}
+events: list[tuple[str, str]] = []
+deleted: set[str] = set()
+delete_seen: set[str] = set()
+upsert_seen: set[str] = set()
+present: dict[str, tuple[str, ...]] = {}
+
+for raw_line in raw_diff_path.read_text().splitlines():
+    line = raw_line.strip()
+    if not line:
+        continue
+
+    parts = line.split("\t")
+    status_token = parts[0]
+    status = status_token[0]
+
+    if status == "D":
+        path = parts[1]
+        deleted.add(path)
+        if path not in delete_seen:
+            events.append(("delete", path))
+            delete_seen.add(path)
+        continue
+
+    if status == "R":
+        old_path, new_path = parts[1], parts[2]
+        deleted.add(old_path)
+        if old_path not in delete_seen:
+            events.append(("delete", old_path))
+            delete_seen.add(old_path)
+        record = (status_token, old_path, new_path)
+        target = new_path
+    else:
+        path = parts[1]
+        record = (status, path)
+        target = path
+
+    if target not in upsert_seen:
+        events.append(("upsert", target))
+        upsert_seen.add(target)
+
+    existing = present.get(target)
+    if existing is None or priorities[status] > priorities[existing[0][0]]:
+        present[target] = record
+
+rename_old_paths = {
+    record[1]
+    for record in present.values()
+    if record[0].startswith("R")
+}
+present_targets = set(present)
+output_lines: list[str] = []
+emitted_upserts: set[str] = set()
+emitted_deletes: set[str] = set()
+
+for kind, key in events:
+    if kind == "delete":
+        if key in emitted_deletes or key in present_targets or key in rename_old_paths:
+            continue
+        if key in deleted:
+            output_lines.append(f"D\t{key}")
+            emitted_deletes.add(key)
+        continue
+
+    if key in emitted_upserts:
+        continue
+
+    record = present.get(key)
+    if record is None:
+        continue
+
+    if record[0].startswith("R"):
+        output_lines.append(f"{record[0]}\t{record[1]}\t{record[2]}")
+    elif key in deleted:
+        output_lines.append(f"M\t{key}")
+    else:
+        output_lines.append(f"{record[0]}\t{record[1]}")
+    emitted_upserts.add(key)
+
+diff_path.write_text("".join(f"{line}\n" for line in output_lines))
+PY
 
 if [ ! -s "$diff_file" ]; then
   exit 0
