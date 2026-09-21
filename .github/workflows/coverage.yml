@@ -38,9 +38,11 @@ jobs:
         run: python -m coverage report --fail-under=70
 
       - name: Generate XML coverage report
+        if: always()
         run: python -m coverage xml
 
       - name: Generate HTML coverage report
+        if: always()
         run: python -m coverage html
 
       - name: Upload coverage report
