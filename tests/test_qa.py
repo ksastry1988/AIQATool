@@ -93,6 +93,8 @@ def test_ask_question_returns_no_results_without_calling_model(tmp_path, monkeyp
     monkeypatch.setattr(qa, "embed_texts", lambda texts: [[1.0, 0.0]])
 
     class EmptyStore:
+        STORE_FILENAME = VectorStore.STORE_FILENAME
+
         @staticmethod
         def open(path):
             return EmptyStore()
