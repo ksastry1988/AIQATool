@@ -14,7 +14,7 @@ Skeleton / work in progress. Some core pieces are still stubbed with `TODO`s:
 - `qatool/chunking.py` — tree-sitter based, function/class-level chunking
 - `qatool/embeddings.py` — embedding provider (Voyage AI recommended)
 - `qatool/vectorstore.py` — implemented persistent local vector store
-- `qatool/cli.py` — `index` and `ask` commands
+- `qatool/cli.py` — `index`, `ask`, and `reindex` commands
 - `qatool/reindex.py` — incremental re-indexing (implemented), used by
   the git hook below
 
@@ -24,12 +24,18 @@ Skeleton / work in progress. Some core pieces are still stubbed with `TODO`s:
 pip install -e .
 ```
 
-## Usage (once implemented)
+## Usage
 
 ```bash
 qatool index ./path-to-repo
-qatool ask "where does authentication happen"
+qatool ask --repo ./path-to-repo "where does authentication happen"
 ```
+
+The ask command retrieves up to eight relevant chunks by default. Use
+`--top-k` to change the number of retrieved chunks. It sends the question and
+retrieved context to Claude, returns an answer with source citations, and
+requires `ANTHROPIC_API_KEY`. Set `QATOOL_MODEL` to override the default Claude
+model.
 
 ## Docker
 
