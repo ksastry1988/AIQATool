@@ -77,7 +77,7 @@ def _run_git(
 def _setup_hooked_repo(tmp_path: Path) -> tuple[Path, dict[str, str], Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
-    _run_git(repo, "init")
+    _run_git(repo, "init", "--initial-branch=master")
     _run_git(repo, "config", "user.name", "Test User")
     _run_git(repo, "config", "user.email", "test@example.com")
 

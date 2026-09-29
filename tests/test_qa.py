@@ -103,6 +103,10 @@ def test_ask_question_returns_no_results_without_calling_model(tmp_path, monkeyp
         def query(vector, top_k):
             return []
 
+        @staticmethod
+        def find_exact(symbols, filenames, vector=None):
+            return []
+
     monkeypatch.setattr(qa, "VectorStore", EmptyStore)
     assert qa.ask_question(repo, "question", model_client=None) == (
         "No relevant results found in the local index."

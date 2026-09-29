@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .embeddings import embed_texts
 from .indexing import validate_repository_path
+from .lookup import extract_query_terms, merge_results
 from .vectorstore import VectorStore
 
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
@@ -115,6 +116,8 @@ def format_retrieved_chunks(chunks: list[dict]) -> str:
             details.append(f"Symbol: {metadata['symbol']}")
         if metadata.get("language"):
             details.append(f"Language: {metadata['language']}")
+        if chunk.get("match") in ("symbol", "definition", "filename"):
+            details.append(f"Match: exact {chunk['match']}")
         formatted.append(f"[{index}] {' | '.join(details)}\n{chunk.get('text', '')}")
     return "\n\n".join(formatted)
 
@@ -137,7 +140,11 @@ def ask_question(
     query_vectors = embed_texts([question])
     if len(query_vectors) != 1:
         raise AskError(f"question embedding count mismatch: expected 1, got {len(query_vectors)}")
-    results = VectorStore.open(index_path).query(query_vectors[0], top_k=top_k)
+    store = VectorStore.open(index_path)
+    terms = extract_query_terms(question)
+    exact = store.find_exact(terms.symbols, terms.filenames, vector=query_vectors[0])
+    semantic = store.query(query_vectors[0], top_k=top_k)
+    results = merge_results(exact, semantic, top_k)
     if not results:
         return "No relevant results found in the local index."
 
