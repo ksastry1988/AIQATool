@@ -35,8 +35,23 @@ def cmd_reindex(args: argparse.Namespace) -> None:
 
 
 def cmd_ask(args: argparse.Namespace) -> None:
-    # TODO: embed query, retrieve top-k chunks, call Claude with context
-    print(f"[qatool] question: {args.question!r} — not yet implemented")
+    from .qa import AskError, ask_question
+
+    try:
+        print(ask_question(args.repo, args.question, top_k=args.top_k))
+    except (AskError, ValueError) as exc:
+        print(f"[qatool] error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,6 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ask = sub.add_parser("ask", help="Ask a question about the codebase")
     p_ask.add_argument("question")
+    p_ask.add_argument("--repo", type=Path, default=Path.cwd())
+    p_ask.add_argument("--top-k", type=_positive_int, default=8)
     p_ask.set_defaults(func=cmd_ask)
 
     return parser
