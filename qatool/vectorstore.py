@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import tempfile
 import uuid
 from contextlib import contextmanager
@@ -209,34 +210,106 @@ class VectorStore:
             self._data["file_hashes"][rel_path] = new_hash
             self._persist()
 
+    @staticmethod
+    def _similarity(vector: list[float], chunk: dict[str, Any]) -> float:
+        chunk_vector = chunk.get("vector", [])
+        if len(chunk_vector) != len(vector):
+            raise ValueError("query vector dimension mismatch")
+        query_norm = math.sqrt(sum(value * value for value in vector))
+        chunk_norm = math.sqrt(sum(value * value for value in chunk_vector))
+        if query_norm == 0.0 or chunk_norm == 0.0:
+            return 0.0
+        return sum(a * b for a, b in zip(vector, chunk_vector)) / (query_norm * chunk_norm)
+
+    @staticmethod
+    def _result(chunk: dict[str, Any], score: float, match: str) -> dict[str, Any]:
+        return {
+            "id": chunk.get("id"),
+            "text": chunk.get("text", ""),
+            "metadata": dict(chunk.get("metadata", {})),
+            "score": score,
+            "match": match,
+        }
+
     def query(self, vector: list[float], top_k: int = 8) -> list[Any]:
         """Return the top_k most similar chunks to the query vector."""
         if top_k <= 0:
             return []
 
         with self._locked():
-            query_norm = math.sqrt(sum(value * value for value in vector))
-            scored: list[dict[str, Any]] = []
+            scored = [
+                self._result(chunk, self._similarity(vector, chunk), "vector")
+                for chunk in self._data["chunks"]
+            ]
 
+        scored.sort(key=lambda chunk: chunk["score"], reverse=True)
+        return scored[:top_k]
+
+    def find_exact(
+        self,
+        symbols: set[str],
+        filenames: set[str],
+        vector: list[float] | None = None,
+    ) -> list[Any]:
+        """Return chunks that exactly match a symbol or filename.
+
+        A symbol matches the chunk's `symbol` metadata (case-sensitive), or,
+        failing that, a definition of it in the chunk text (`def name`,
+        `class Name`, `func name`, ...) so whole-file chunks without symbol
+        metadata are still found. A filename matches the chunk's `file` path
+        in full, as a trailing path suffix (`qatool/cli.py`), or by basename
+        (`cli.py`). Ranking is symbol, then definition, then filename; within
+        each group chunks are ordered by similarity to `vector` when given,
+        else by file and line.
+        """
+        if not symbols and not filenames:
+            return []
+
+        definition = _definition_pattern(symbols)
+        with self._locked():
+            matches = []
             for chunk in self._data["chunks"]:
-                chunk_vector = chunk.get("vector", [])
-                if len(chunk_vector) != len(vector):
-                    raise ValueError("query vector dimension mismatch")
-                chunk_norm = math.sqrt(sum(value * value for value in chunk_vector))
-                if query_norm == 0.0 or chunk_norm == 0.0:
-                    score = 0.0
+                metadata = chunk.get("metadata", {})
+                if metadata.get("symbol") in symbols:
+                    match = "symbol"
+                elif definition is not None and definition.search(chunk.get("text", "")):
+                    match = "definition"
+                elif _file_matches(metadata.get("file"), filenames):
+                    match = "filename"
                 else:
-                    score = sum(a * b for a, b in zip(vector, chunk_vector)) / (
-                        query_norm * chunk_norm
-                    )
+                    continue
+                score = self._similarity(vector, chunk) if vector is not None else 0.0
+                matches.append(self._result(chunk, score, match))
 
-                scored.append(
-                    {
-                        "text": chunk.get("text", ""),
-                        "metadata": dict(chunk.get("metadata", {})),
-                        "score": score,
-                    }
-                )
+        matches.sort(
+            key=lambda result: (
+                _MATCH_RANK[result["match"]],
+                -result["score"],
+                str(result["metadata"].get("file", "")),
+                result["metadata"].get("start_line") or 0,
+            )
+        )
+        return matches
 
-            scored.sort(key=lambda chunk: chunk["score"], reverse=True)
-            return scored[:top_k]
+
+_MATCH_RANK = {"symbol": 0, "definition": 1, "filename": 2}
+_DEFINITION_KEYWORDS = (
+    "def|class|function|func|fn|struct|enum|trait|interface|type|const|let|var"
+)
+
+
+def _definition_pattern(symbols: set[str]) -> re.Pattern[str] | None:
+    """Match a keyword-introduced definition of any symbol (Go receivers allowed)."""
+    if not symbols:
+        return None
+    names = "|".join(re.escape(symbol) for symbol in sorted(symbols))
+    return re.compile(rf"\b(?:{_DEFINITION_KEYWORDS})\s+(?:\([^)]*\)\s*)?(?:{names})\b")
+
+
+def _file_matches(rel_path: Any, filenames: set[str]) -> bool:
+    if not isinstance(rel_path, str) or not filenames:
+        return False
+    for name in filenames:
+        if rel_path == name or rel_path.endswith(f"/{name}"):
+            return True
+    return False
