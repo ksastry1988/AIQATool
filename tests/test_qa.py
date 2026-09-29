@@ -202,6 +202,20 @@ def test_claude_client_reports_http_errors(monkeypatch):
         qa.ClaudeModelClient(api_key="test-key").generate("question", "context")
 
 
+def test_claude_client_reports_connection_errors(monkeypatch):
+    def fail_request(request, timeout):
+        raise urllib.error.URLError("offline")
+
+    monkeypatch.setattr(
+        qa.urllib.request,
+        "urlopen",
+        fail_request,
+    )
+
+    with pytest.raises(qa.AskError, match="Claude request failed:"):
+        qa.ClaudeModelClient(api_key="test-key").generate("question", "context")
+
+
 def test_cli_ask_accepts_repo_and_top_k_options(monkeypatch, tmp_path, capsys):
     captured = {}
 
