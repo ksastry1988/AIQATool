@@ -1,10 +1,12 @@
 """Tests for qatool.chunking module."""
 
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
+from qatool import chunking
 from qatool.chunking import Chunk, chunk_file
 
 
@@ -73,8 +75,11 @@ class TestChunkFile:
         finally:
             path.unlink()
 
-    def test_chunk_python_file_without_tree_sitter(self):
-        """Python file should still chunk even without tree-sitter."""
+    def test_chunk_python_file_without_tree_sitter(self, monkeypatch):
+        """Python file should still chunk when its grammar package is missing."""
+        monkeypatch.setitem(sys.modules, "tree_sitter_python", None)  # import raises
+        chunking._parser_for.cache_clear()
+        monkeypatch.setattr(chunking, "_parser_for", chunking._parser_for.__wrapped__)
         python_code = """def func1():
     pass
 
