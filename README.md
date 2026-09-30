@@ -12,6 +12,8 @@ retrieved, language-aware code chunks.
 Skeleton / work in progress. Some core pieces are still stubbed with `TODO`s:
 
 - `qatool/chunking.py` — tree-sitter based, function/class-level chunking
+  (implemented for Python, JavaScript, TypeScript, Go, Java, Rust, C/C++;
+  other files are indexed as whole-file chunks)
 - `qatool/embeddings.py` — embedding provider (Voyage AI recommended)
 - `qatool/vectorstore.py` — implemented persistent local vector store
 - `qatool/cli.py` — `index`, `ask`, and `reindex` commands

@@ -44,7 +44,7 @@ flowchart TD
 
 | Component | Responsibility | Status |
 |---|---|---|
-| `chunking.py` | Split files into semantically coherent chunks via tree-sitter (function/class level, not fixed-size windows) | Stub |
+| `chunking.py` | Split files into semantically coherent chunks via tree-sitter (function/class level, not fixed-size windows) | Implemented (Python, JS, TS, Go, Java, Rust, C/C++) |
 | `embeddings.py` | Batched calls to an embedding provider (Voyage AI recommended, pairs well with Claude) | Stub |
 | `vectorstore.py` | Thin wrapper over a vector DB; stores chunk text + metadata (file, line range, symbol, content hash) | Stub |
 | `reindex.py` | Incremental re-indexing: diffs changed files, skips unchanged content via hash, upserts only what changed | Implemented |
