@@ -317,7 +317,7 @@ def test_reindex_rejects_index_based_on_different_commit(tmp_path):
 def test_reindex_rejects_head_change_before_atomic_store_update(
     tmp_path, monkeypatch
 ):
-    repo, store, _ = _setup_indexed_git_repo(
+    repo, store, base_sha = _setup_indexed_git_repo(
         tmp_path, {"tracked.py": "print('old')\n"}
     )
     store_path = repo / ".qatool" / "index" / "store.json"
@@ -333,7 +333,7 @@ def test_reindex_rejects_head_change_before_atomic_store_update(
         ],
     )
     monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[2.0] for _ in texts])
-    commit_states = iter([(target_sha, "base"), ("different-head", "base")])
+    commit_states = iter([(target_sha, base_sha), ("different-head", base_sha)])
     monkeypatch.setattr(
         "qatool.reindex.repository_commit_state", lambda repo_root: next(commit_states)
     )

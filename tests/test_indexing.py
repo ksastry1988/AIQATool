@@ -90,6 +90,27 @@ def test_index_repository_persists_current_commit_sha(tmp_path, monkeypatch):
     assert reopened.get_indexed_commit_sha() == commit_sha
 
 
+def test_index_repository_does_not_advance_marker_when_head_changes(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tracked.py").write_text("def tracked():\n    return True\n")
+    store = VectorStore.open(repo / ".qatool" / "index")
+    store.set_indexed_commit_sha("previous-commit")
+    commit_shas = iter(["initial-commit", "new-head"])
+    monkeypatch.setattr(
+        "qatool.indexing.current_commit_sha", lambda repo_root: next(commit_shas)
+    )
+    monkeypatch.setattr("qatool.indexing.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    index_repository(repo, store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_indexed_commit_sha() == "previous-commit"
+    assert "HEAD changed during indexing" in capsys.readouterr().err
+
+
 def test_index_repository_batches_embeddings_and_reports_progress(
     tmp_path, monkeypatch, capsys
 ):
@@ -362,6 +383,40 @@ def test_vector_store_replace_file_updates_chunks_and_hash_atomically(tmp_path):
     persisted = json.loads((tmp_path / "index" / "store.json").read_text())
     assert reopened.get_file_hash("a.py") == "hash-b"
     assert [chunk["text"] for chunk in persisted["chunks"]] == ["beta"]
+
+
+def test_vector_store_apply_file_changes_rolls_back_failed_persistence(
+    tmp_path, monkeypatch
+):
+    store_path = tmp_path / "index"
+    store = VectorStore.open(store_path)
+    store.replace_file(
+        "a.py",
+        "hash-a",
+        [Chunk(text="alpha", metadata={"file": "a.py"})],
+        [[1.0]],
+    )
+    previous_data = (store_path / "store.json").read_text()
+    original_replace = Path.replace
+
+    def failing_replace(self, target):
+        if self.suffix == ".tmp":
+            raise OSError("replace failed")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", failing_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        store.apply_file_changes(
+            [("a.py", "hash-b", [Chunk(text="beta", metadata={"file": "a.py"})], [[2.0]])],
+            set(),
+            "commit-b",
+        )
+
+    assert (store_path / "store.json").read_text() == previous_data
+    assert store.get_file_hash("a.py") == "hash-a"
+    assert store.get_indexed_commit_sha() is None
+    assert list(store_path.glob("*.tmp")) == []
 
 
 def test_vector_store_cleans_temp_files_when_replace_fails(tmp_path, monkeypatch):

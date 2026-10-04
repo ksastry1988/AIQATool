@@ -188,7 +188,11 @@ def main() -> None:
 
     changes = parse_diff_output(diff_text)
     store = VectorStore.open(repo_root / ".qatool" / "index")
-    reindex(repo_root, changes, store)
+    try:
+        reindex(repo_root, changes, store)
+    except Exception as exc:
+        print(f"[qatool] error: reindex failed: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
 
 if __name__ == "__main__":

@@ -129,12 +129,15 @@ def repository_commit_state(repo_root: Path) -> tuple[str | None, str | None]:
     if head_sha is None:
         return None, None
 
-    parent_result = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--verify", "HEAD^"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        parent_result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--verify", "HEAD^"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return head_sha, None
     parent_sha = parent_result.stdout.strip() if parent_result.returncode == 0 else None
     return head_sha, parent_sha or None
 
