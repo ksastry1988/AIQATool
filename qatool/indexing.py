@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import subprocess
 import sys
 from pathlib import Path
 
@@ -110,6 +111,22 @@ def should_index(path: Path, repo_root: Path, ignore_patterns: set[str]) -> bool
 
 def file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def current_commit_sha(repo_root: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    commit_sha = result.stdout.strip()
+    return commit_sha or None
 
 
 def validate_repository_path(repo_root: Path) -> Path:
@@ -282,3 +299,6 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
         f"{indexed_chunks} chunk(s), {deleted_files} deletion(s), "
         f"{len(errors)} error(s)"
     )
+    commit_sha = current_commit_sha(repo_root)
+    if commit_sha is not None and not errors:
+        store.set_indexed_commit_sha(commit_sha)

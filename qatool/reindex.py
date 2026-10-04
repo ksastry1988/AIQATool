@@ -24,6 +24,7 @@ from .embeddings import embed_texts       # batched embedding calls
 from .indexing import (
     file_hash,
     load_ignore_patterns,
+    current_commit_sha,
     should_index,
     validate_repository_path,
 )
@@ -92,6 +93,7 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
 
     if not to_process:
         print(f"[qatool] nothing to re-embed ({len(deleted)} deletions applied)")
+        _record_indexed_commit(repo_root, store)
         return
 
     # 3. Drop old chunks for files that changed, then re-chunk + re-embed.
@@ -123,6 +125,13 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
         f"[qatool] reindexed {len(to_process)} file(s), "
         f"{total_chunks} chunk(s), {len(deleted)} deletion(s) applied"
     )
+    _record_indexed_commit(repo_root, store)
+
+
+def _record_indexed_commit(repo_root: Path, store: VectorStore) -> None:
+    commit_sha = current_commit_sha(repo_root)
+    if commit_sha is not None:
+        store.set_indexed_commit_sha(commit_sha)
 
 
 def require_existing_index(repo_root: Path) -> Path:
@@ -153,9 +162,6 @@ def main() -> None:
         raise SystemExit(2) from exc
 
     changes = parse_diff_output(diff_text)
-    if not changes:
-        sys.exit(0)
-
     store = VectorStore.open(repo_root / ".qatool" / "index")
     reindex(repo_root, changes, store)
 

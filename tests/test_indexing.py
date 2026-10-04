@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -54,6 +55,39 @@ def test_index_repository_skips_unchanged_files_on_repeat_runs(tmp_path, monkeyp
     output = capsys.readouterr().out
     assert len(calls) == 1
     assert "1 unchanged" in output
+
+
+def test_index_repository_persists_current_commit_sha(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "tracked.py").write_text("def tracked():\n    return True\n")
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Test User"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.py"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "add tracked file"],
+        check=True,
+        capture_output=True,
+    )
+    commit_sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.setattr("qatool.indexing.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    index_repository(repo, VectorStore.open(repo / ".qatool" / "index"))
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_indexed_commit_sha() == commit_sha
 
 
 def test_index_repository_batches_embeddings_and_reports_progress(

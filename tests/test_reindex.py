@@ -387,6 +387,20 @@ def test_post_commit_hook_handles_resolved_merge_commits(tmp_path):
     assert diff_lines == ["M\tshared.txt"]
 
 
+def test_post_commit_hook_invokes_reindex_for_empty_diff(tmp_path):
+    repo, env, argv_capture, diff_capture = _setup_hooked_repo(tmp_path)
+
+    (repo / "tracked.py").write_text("print('one')\n")
+    _run_git(repo, "add", "tracked.py")
+    _run_git(repo, "commit", "-m", "initial import", env=env)
+
+    _run_git(repo, "commit", "--allow-empty", "-m", "empty commit", env=env)
+
+    argv = json.loads(argv_capture.read_text())
+    assert argv[:4] == ["reindex", "--repo", str(repo.resolve())]
+    assert diff_capture.read_text() == ""
+
+
 def test_reindex_main_requires_existing_local_index(tmp_path, monkeypatch, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -412,3 +426,34 @@ def test_reindex_main_requires_existing_local_index(tmp_path, monkeypatch, capsy
     error_output = capsys.readouterr().err
     assert "local index not found" in error_output
     assert str(repo / ".qatool" / "index" / "store.json") in error_output
+
+
+def test_reindex_main_persists_commit_sha_for_empty_diff(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_git(repo, "init", "--initial-branch=master")
+    _run_git(repo, "config", "user.name", "Test User")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    (repo / "tracked.py").write_text("print('tracked')\n")
+    _run_git(repo, "add", "tracked.py")
+    _run_git(repo, "commit", "-m", "initial commit")
+    commit_sha = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    changed_files = tmp_path / "changed.txt"
+    changed_files.write_text("")
+    store = VectorStore.open(repo / ".qatool" / "index")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "qatool-reindex",
+            "--repo",
+            str(repo),
+            "--changed-files",
+            str(changed_files),
+        ],
+    )
+
+    reindex_main()
+
+    assert store.get_indexed_commit_sha() == commit_sha

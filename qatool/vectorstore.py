@@ -39,6 +39,7 @@ class VectorStore:
         self._data: dict[str, Any] = {
             "file_hashes": {},
             "chunks": [],
+            "indexed_commit_sha": None,
         }
         self._load()
 
@@ -51,6 +52,7 @@ class VectorStore:
         self._data = {
             "file_hashes": {},
             "chunks": [],
+            "indexed_commit_sha": None,
         }
         if not self._store_path.exists():
             return
@@ -58,6 +60,7 @@ class VectorStore:
         raw = json.loads(self._store_path.read_text())
         self._data["file_hashes"] = dict(raw.get("file_hashes", {}))
         self._data["chunks"] = list(raw.get("chunks", []))
+        self._data["indexed_commit_sha"] = raw.get("indexed_commit_sha")
 
     def _persist(self) -> None:
         tmp_path: Path | None = None
@@ -133,6 +136,15 @@ class VectorStore:
         """Return the last-indexed content hash for a file, if any."""
         with self._locked():
             return self._data["file_hashes"].get(rel_path)
+
+    def get_indexed_commit_sha(self) -> str | None:
+        with self._locked():
+            return self._data["indexed_commit_sha"]
+
+    def set_indexed_commit_sha(self, commit_sha: str) -> None:
+        with self._locked():
+            self._data["indexed_commit_sha"] = commit_sha
+            self._persist()
 
     def snapshot(self) -> dict[str, Any]:
         with self._locked():
