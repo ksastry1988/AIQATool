@@ -11,15 +11,7 @@ Classifier: Programming Language :: Python :: 3.12
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
-Requires-Dist: tree-sitter>=0.24.0
-Requires-Dist: tree-sitter-python>=0.23.0
-Requires-Dist: tree-sitter-javascript>=0.23.0
-Requires-Dist: tree-sitter-typescript>=0.23.0
-Requires-Dist: tree-sitter-go>=0.23.0
-Requires-Dist: tree-sitter-java>=0.23.0
-Requires-Dist: tree-sitter-rust>=0.23.0
-Requires-Dist: tree-sitter-c>=0.23.0
-Requires-Dist: tree-sitter-cpp>=0.23.0
+Requires-Dist: tree-sitter>=0.21.0
 Provides-Extra: test
 Requires-Dist: pytest>=8.0; extra == "test"
 Requires-Dist: coverage[toml]>=7.0; extra == "test"
@@ -38,11 +30,9 @@ retrieved, language-aware code chunks.
 Skeleton / work in progress. Some core pieces are still stubbed with `TODO`s:
 
 - `qatool/chunking.py` — tree-sitter based, function/class-level chunking
-  (implemented for Python, JavaScript, TypeScript, Go, Java, Rust, C/C++;
-  other files are indexed as whole-file chunks)
 - `qatool/embeddings.py` — embedding provider (Voyage AI recommended)
 - `qatool/vectorstore.py` — implemented persistent local vector store
-- `qatool/cli.py` — `index`, `ask`, and `reindex` commands
+- `qatool/cli.py` — `index` and `ask` commands
 - `qatool/reindex.py` — incremental re-indexing (implemented), used by
   the git hook below
 
@@ -52,18 +42,12 @@ Skeleton / work in progress. Some core pieces are still stubbed with `TODO`s:
 pip install -e .
 ```
 
-## Usage
+## Usage (once implemented)
 
 ```bash
 qatool index ./path-to-repo
-qatool ask --repo ./path-to-repo "where does authentication happen"
+qatool ask "where does authentication happen"
 ```
-
-The ask command retrieves up to eight relevant chunks by default. Use
-`--top-k` to change the number of retrieved chunks. It sends the question and
-retrieved context to Claude, returns an answer with source citations, and
-requires `ANTHROPIC_API_KEY`. Set `QATOOL_MODEL` to override the default Claude
-model.
 
 ## Docker
 
