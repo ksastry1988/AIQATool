@@ -207,6 +207,143 @@ def _run_git(
     )
 
 
+def _setup_indexed_git_repo(
+    tmp_path: Path, files: dict[str, str]
+) -> tuple[Path, VectorStore, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_git(repo, "init", "--initial-branch=master")
+    _run_git(repo, "config", "user.name", "Test User")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    (repo / ".gitignore").write_text(".qatool/\n")
+    for rel_path, content in files.items():
+        path = repo / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    _run_git(repo, "add", ".")
+    _run_git(repo, "commit", "-m", "base commit")
+    base_sha = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
+
+    store = VectorStore.open(repo / ".qatool" / "index")
+    for rel_path, content in files.items():
+        _seed_indexed_file(repo, store, rel_path, content)
+    store.set_indexed_commit_sha(base_sha)
+    return repo, store, base_sha
+
+
+def test_reindex_successfully_advances_commit_marker_with_file_changes(
+    tmp_path, monkeypatch
+):
+    repo, store, base_sha = _setup_indexed_git_repo(
+        tmp_path, {"tracked.py": "print('old')\n"}
+    )
+    tracked_path = repo / "tracked.py"
+    tracked_path.write_text("print('new')\n")
+    _run_git(repo, "add", "tracked.py")
+    _run_git(repo, "commit", "-m", "update tracked file")
+    target_sha = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(
+        "qatool.reindex.chunk_file",
+        lambda full_path, rel_path: [
+            Chunk(text=full_path.read_text(), metadata={"file": rel_path})
+        ],
+    )
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[2.0] for _ in texts])
+
+    reindex(repo, parse_diff_output("M\ttracked.py"), store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert base_sha != target_sha
+    assert reopened.get_indexed_commit_sha() == target_sha
+    assert reopened.get_file_hash("tracked.py") == file_hash(tracked_path)
+    assert [chunk["text"] for chunk in _chunks_for_file(reopened, "tracked.py")] == [
+        "print('new')\n"
+    ]
+
+
+def test_reindex_embedding_failure_preserves_index_and_commit_marker(
+    tmp_path, monkeypatch
+):
+    repo, store, base_sha = _setup_indexed_git_repo(
+        tmp_path,
+        {"tracked.py": "print('old')\n", "removed.py": "print('remove')\n"},
+    )
+    store_path = repo / ".qatool" / "index" / "store.json"
+    previous_data = store_path.read_text()
+    removed_hash = store.get_file_hash("removed.py")
+    (repo / "tracked.py").write_text("print('new')\n")
+    (repo / "removed.py").unlink()
+    _run_git(repo, "add", "-A")
+    _run_git(repo, "commit", "-m", "modify and delete")
+    monkeypatch.setattr(
+        "qatool.reindex.chunk_file",
+        lambda full_path, rel_path: [
+            Chunk(text=full_path.read_text(), metadata={"file": rel_path})
+        ],
+    )
+
+    def fail_embedding(texts):
+        raise RuntimeError("embedding unavailable")
+
+    monkeypatch.setattr("qatool.reindex.embed_texts", fail_embedding)
+
+    with pytest.raises(RuntimeError, match="embedding unavailable"):
+        reindex(repo, parse_diff_output("M\ttracked.py\nD\tremoved.py"), store)
+
+    assert store_path.read_text() == previous_data
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_indexed_commit_sha() == base_sha
+    assert reopened.get_file_hash("removed.py") == removed_hash
+
+
+def test_reindex_rejects_index_based_on_different_commit(tmp_path):
+    repo, store, _ = _setup_indexed_git_repo(
+        tmp_path, {"tracked.py": "print('old')\n"}
+    )
+    (repo / "tracked.py").write_text("print('new')\n")
+    _run_git(repo, "add", "tracked.py")
+    _run_git(repo, "commit", "-m", "modify tracked file")
+    previous_hash = store.get_file_hash("tracked.py")
+    store.set_indexed_commit_sha("not-the-parent")
+
+    with pytest.raises(ValueError, match="index base commit mismatch"):
+        reindex(repo, parse_diff_output("M\ttracked.py"), store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_indexed_commit_sha() == "not-the-parent"
+    assert reopened.get_file_hash("tracked.py") == previous_hash
+
+
+def test_reindex_rejects_head_change_before_atomic_store_update(
+    tmp_path, monkeypatch
+):
+    repo, store, _ = _setup_indexed_git_repo(
+        tmp_path, {"tracked.py": "print('old')\n"}
+    )
+    store_path = repo / ".qatool" / "index" / "store.json"
+    previous_data = store_path.read_text()
+    (repo / "tracked.py").write_text("print('new')\n")
+    _run_git(repo, "add", "tracked.py")
+    _run_git(repo, "commit", "-m", "modify tracked file")
+    target_sha = _run_git(repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(
+        "qatool.reindex.chunk_file",
+        lambda full_path, rel_path: [
+            Chunk(text=full_path.read_text(), metadata={"file": rel_path})
+        ],
+    )
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[2.0] for _ in texts])
+    commit_states = iter([(target_sha, "base"), ("different-head", "base")])
+    monkeypatch.setattr(
+        "qatool.reindex.repository_commit_state", lambda repo_root: next(commit_states)
+    )
+
+    with pytest.raises(RuntimeError, match="HEAD changed during reindex"):
+        reindex(repo, parse_diff_output("M\ttracked.py"), store)
+
+    assert store_path.read_text() == previous_data
+
+
 def _setup_hooked_repo(tmp_path: Path) -> tuple[Path, dict[str, str], Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()

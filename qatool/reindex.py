@@ -24,7 +24,7 @@ from .embeddings import embed_texts       # batched embedding calls
 from .indexing import (
     file_hash,
     load_ignore_patterns,
-    current_commit_sha,
+    repository_commit_state,
     should_index,
     validate_repository_path,
 )
@@ -54,6 +54,16 @@ def parse_diff_output(diff_text: str) -> list[FileChange]:
 
 
 def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> None:
+    target_commit_sha, base_commit_sha = repository_commit_state(repo_root)
+    if target_commit_sha is not None:
+        indexed_commit_sha = store.get_indexed_commit_sha()
+        if indexed_commit_sha != base_commit_sha:
+            raise ValueError(
+                "index base commit mismatch: "
+                f"index is at {indexed_commit_sha or 'unknown'}, "
+                f"but HEAD is based on {base_commit_sha or 'no parent'}"
+            )
+
     ignore_patterns = load_ignore_patterns(repo_root)
 
     added_or_modified: dict[str, Path] = {}
@@ -78,11 +88,7 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
 
         added_or_modified[target] = full_path
 
-    # 1. Remove stale chunks for deleted/renamed-away files.
-    for path in sorted(deleted):
-        store.delete_by_file(path)
-
-    # 2. Skip files whose content hash matches what's already indexed
+    # Skip files whose content hash matches what's already indexed
     #    (avoids re-embedding on no-op merges or metadata-only changes).
     to_process = []
     for rel_path, path in added_or_modified.items():
@@ -93,10 +99,16 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
 
     if not to_process:
         print(f"[qatool] nothing to re-embed ({len(deleted)} deletions applied)")
-        _record_indexed_commit(repo_root, store)
+        _commit_reindex(
+            repo_root,
+            target_commit_sha,
+            store,
+            [],
+            deleted,
+        )
         return
 
-    # 3. Drop old chunks for files that changed, then re-chunk + re-embed.
+    # Prepare all replacements before applying any changes to the store.
     all_chunks = []
     for rel_path, full_path, new_hash in to_process:
         chunks = chunk_file(full_path, rel_path)  # -> list[Chunk(text, metadata)]
@@ -113,25 +125,38 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
             )
 
         offset = 0
+        replacements = []
         for rel_path, chunks, new_hash in all_chunks:
             chunk_vectors = vectors[offset:offset + len(chunks)]
-            store.replace_file(rel_path, new_hash, chunks, chunk_vectors)
+            replacements.append((rel_path, new_hash, chunks, chunk_vectors))
             offset += len(chunks)
     else:
-        for rel_path, chunks, new_hash in all_chunks:
-            store.replace_file(rel_path, new_hash, chunks, [])
+        replacements = [
+            (rel_path, new_hash, chunks, [])
+            for rel_path, chunks, new_hash in all_chunks
+        ]
+
+    _commit_reindex(repo_root, target_commit_sha, store, replacements, deleted)
 
     print(
         f"[qatool] reindexed {len(to_process)} file(s), "
         f"{total_chunks} chunk(s), {len(deleted)} deletion(s) applied"
     )
-    _record_indexed_commit(repo_root, store)
 
 
-def _record_indexed_commit(repo_root: Path, store: VectorStore) -> None:
-    commit_sha = current_commit_sha(repo_root)
-    if commit_sha is not None:
-        store.set_indexed_commit_sha(commit_sha)
+def _commit_reindex(
+    repo_root: Path,
+    target_commit_sha: str | None,
+    store: VectorStore,
+    replacements: list[tuple[str, str, list, list[list[float]]]],
+    deletions: set[str],
+) -> None:
+    current_sha, _ = repository_commit_state(repo_root)
+    if current_sha != target_commit_sha:
+        raise RuntimeError(
+            "repository HEAD changed during reindex; index was not updated"
+        )
+    store.apply_file_changes(replacements, deletions, target_commit_sha)
 
 
 def require_existing_index(repo_root: Path) -> Path:

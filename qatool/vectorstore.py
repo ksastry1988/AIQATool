@@ -222,6 +222,55 @@ class VectorStore:
             self._data["file_hashes"][rel_path] = new_hash
             self._persist()
 
+    def apply_file_changes(
+        self,
+        replacements: list[tuple[str, str, list[Any], list[list[float]]]],
+        deletions: set[str],
+        indexed_commit_sha: str | None = None,
+    ) -> None:
+        replacement_chunks = []
+        for rel_path, _, chunks, vectors in replacements:
+            if len(chunks) != len(vectors):
+                raise ValueError("chunk/vector count mismatch")
+            replacement_chunks.extend(
+                (rel_path, self._chunk_record(chunk, vector))
+                for chunk, vector in zip(chunks, vectors)
+            )
+
+        with self._locked():
+            previous_data = self._data
+            updated_data = {
+                "file_hashes": {
+                    path: file_hash
+                    for path, file_hash in previous_data["file_hashes"].items()
+                    if path not in deletions
+                },
+                "chunks": [
+                    chunk
+                    for chunk in previous_data["chunks"]
+                    if chunk.get("metadata", {}).get("file") not in deletions
+                ],
+                "indexed_commit_sha": previous_data["indexed_commit_sha"],
+            }
+            replacement_paths = {rel_path for rel_path, _, _, _ in replacements}
+            updated_data["chunks"] = [
+                chunk
+                for chunk in updated_data["chunks"]
+                if chunk.get("metadata", {}).get("file") not in replacement_paths
+            ]
+            for rel_path, new_hash, _, _ in replacements:
+                updated_data["file_hashes"][rel_path] = new_hash
+            updated_data["chunks"].extend(chunk for _, chunk in replacement_chunks)
+            if indexed_commit_sha is not None:
+                updated_data["indexed_commit_sha"] = indexed_commit_sha
+
+            self._data = updated_data
+            try:
+                self._persist()
+            except Exception:
+                self._data = previous_data
+                raise
+
     @staticmethod
     def _similarity(vector: list[float], chunk: dict[str, Any]) -> float:
         chunk_vector = chunk.get("vector", [])
