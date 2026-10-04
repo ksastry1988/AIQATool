@@ -397,7 +397,7 @@ def test_post_commit_hook_invokes_reindex_for_empty_diff(tmp_path):
     _run_git(repo, "commit", "--allow-empty", "-m", "empty commit", env=env)
 
     argv = json.loads(argv_capture.read_text())
-    assert argv[:4] == ["reindex", "--repo", str(repo.resolve())]
+    assert argv[:3] == ["reindex", "--repo", str(repo.resolve())]
     assert diff_capture.read_text() == ""
 
 
@@ -441,6 +441,7 @@ def test_reindex_main_persists_commit_sha_for_empty_diff(tmp_path, monkeypatch):
     changed_files = tmp_path / "changed.txt"
     changed_files.write_text("")
     store = VectorStore.open(repo / ".qatool" / "index")
+    store.set_file_hash("tracked.py", file_hash(repo / "tracked.py"))
 
     monkeypatch.setattr(
         sys,
