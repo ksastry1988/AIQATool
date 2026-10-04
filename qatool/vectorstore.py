@@ -39,6 +39,7 @@ class VectorStore:
         self._data: dict[str, Any] = {
             "file_hashes": {},
             "chunks": [],
+            "indexed_commit_sha": None,
         }
         self._load()
 
@@ -51,6 +52,7 @@ class VectorStore:
         self._data = {
             "file_hashes": {},
             "chunks": [],
+            "indexed_commit_sha": None,
         }
         if not self._store_path.exists():
             return
@@ -58,6 +60,7 @@ class VectorStore:
         raw = json.loads(self._store_path.read_text())
         self._data["file_hashes"] = dict(raw.get("file_hashes", {}))
         self._data["chunks"] = list(raw.get("chunks", []))
+        self._data["indexed_commit_sha"] = raw.get("indexed_commit_sha")
 
     def _persist(self) -> None:
         tmp_path: Path | None = None
@@ -134,6 +137,15 @@ class VectorStore:
         with self._locked():
             return self._data["file_hashes"].get(rel_path)
 
+    def get_indexed_commit_sha(self) -> str | None:
+        with self._locked():
+            return self._data["indexed_commit_sha"]
+
+    def set_indexed_commit_sha(self, commit_sha: str) -> None:
+        with self._locked():
+            self._data["indexed_commit_sha"] = commit_sha
+            self._persist()
+
     def snapshot(self) -> dict[str, Any]:
         with self._locked():
             indexed_files = set(self._data["file_hashes"])
@@ -209,6 +221,55 @@ class VectorStore:
             self._data["chunks"].extend(replacement_chunks)
             self._data["file_hashes"][rel_path] = new_hash
             self._persist()
+
+    def apply_file_changes(
+        self,
+        replacements: list[tuple[str, str, list[Any], list[list[float]]]],
+        deletions: set[str],
+        indexed_commit_sha: str | None = None,
+    ) -> None:
+        replacement_chunks = []
+        for rel_path, _, chunks, vectors in replacements:
+            if len(chunks) != len(vectors):
+                raise ValueError("chunk/vector count mismatch")
+            replacement_chunks.extend(
+                (rel_path, self._chunk_record(chunk, vector))
+                for chunk, vector in zip(chunks, vectors)
+            )
+
+        with self._locked():
+            previous_data = self._data
+            updated_data = {
+                "file_hashes": {
+                    path: file_hash
+                    for path, file_hash in previous_data["file_hashes"].items()
+                    if path not in deletions
+                },
+                "chunks": [
+                    chunk
+                    for chunk in previous_data["chunks"]
+                    if chunk.get("metadata", {}).get("file") not in deletions
+                ],
+                "indexed_commit_sha": previous_data["indexed_commit_sha"],
+            }
+            replacement_paths = {rel_path for rel_path, _, _, _ in replacements}
+            updated_data["chunks"] = [
+                chunk
+                for chunk in updated_data["chunks"]
+                if chunk.get("metadata", {}).get("file") not in replacement_paths
+            ]
+            for rel_path, new_hash, _, _ in replacements:
+                updated_data["file_hashes"][rel_path] = new_hash
+            updated_data["chunks"].extend(chunk for _, chunk in replacement_chunks)
+            if indexed_commit_sha is not None:
+                updated_data["indexed_commit_sha"] = indexed_commit_sha
+
+            self._data = updated_data
+            try:
+                self._persist()
+            except Exception:
+                self._data = previous_data
+                raise
 
     @staticmethod
     def _similarity(vector: list[float], chunk: dict[str, Any]) -> float:
