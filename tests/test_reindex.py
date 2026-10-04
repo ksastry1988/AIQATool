@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from qatool.chunking import Chunk
+from qatool.indexing import file_hash
 from qatool.reindex import main as reindex_main
 from qatool.reindex import parse_diff_output
 from qatool.reindex import reindex
@@ -55,6 +56,138 @@ def test_reindex_deduplicates_overlapping_changed_paths(tmp_path, monkeypatch):
     )
 
     assert calls == ["tracked.py"]
+
+
+def _seed_indexed_file(repo: Path, store: VectorStore, rel_path: str, content: str) -> Path:
+    path = repo / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    store.replace_file(
+        rel_path,
+        file_hash(path),
+        [Chunk(text=content, metadata={"file": rel_path})],
+        [[1.0]],
+    )
+    return path
+
+
+def _chunks_for_file(store: VectorStore, rel_path: str) -> list[dict]:
+    return [
+        chunk
+        for chunk in store.query([1.0], top_k=100)
+        if chunk["metadata"].get("file") == rel_path
+    ]
+
+
+def test_reindex_indexes_added_file(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    added_path = repo / "added.py"
+    added_path.write_text("print('added')\n")
+    store = VectorStore.open(repo / ".qatool" / "index")
+    monkeypatch.setattr(
+        "qatool.reindex.chunk_file",
+        lambda full_path, rel_path: [
+            Chunk(text=full_path.read_text(), metadata={"file": rel_path})
+        ],
+    )
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    reindex(repo, parse_diff_output("A\tadded.py"), store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_file_hash("added.py") == file_hash(added_path)
+    assert [chunk["text"] for chunk in _chunks_for_file(reopened, "added.py")] == [
+        "print('added')\n"
+    ]
+
+
+def test_reindex_replaces_modified_file_chunks(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = VectorStore.open(repo / ".qatool" / "index")
+    modified_path = _seed_indexed_file(repo, store, "modified.py", "print('old')\n")
+    _seed_indexed_file(repo, store, "unchanged.py", "print('keep')\n")
+    modified_path.write_text("print('new')\n")
+    monkeypatch.setattr(
+        "qatool.reindex.chunk_file",
+        lambda full_path, rel_path: [
+            Chunk(text=full_path.read_text(), metadata={"file": rel_path})
+        ],
+    )
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    reindex(repo, parse_diff_output("M\tmodified.py"), store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_file_hash("modified.py") == file_hash(modified_path)
+    assert [chunk["text"] for chunk in _chunks_for_file(reopened, "modified.py")] == [
+        "print('new')\n"
+    ]
+    assert [chunk["text"] for chunk in _chunks_for_file(reopened, "unchanged.py")] == [
+        "print('keep')\n"
+    ]
+
+
+def test_reindex_removes_deleted_file_chunks_and_hash(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = VectorStore.open(repo / ".qatool" / "index")
+    deleted_path = _seed_indexed_file(repo, store, "deleted.py", "print('gone')\n")
+    deleted_path.unlink()
+
+    reindex(repo, parse_diff_output("D\tdeleted.py"), store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_file_hash("deleted.py") is None
+    assert _chunks_for_file(reopened, "deleted.py") == []
+
+
+def test_reindex_moves_renamed_file_chunks_and_hash(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = VectorStore.open(repo / ".qatool" / "index")
+    old_path = _seed_indexed_file(repo, store, "old.py", "print('renamed')\n")
+    new_path = repo / "new.py"
+    old_path.rename(new_path)
+    monkeypatch.setattr(
+        "qatool.reindex.chunk_file",
+        lambda full_path, rel_path: [
+            Chunk(text=full_path.read_text(), metadata={"file": rel_path})
+        ],
+    )
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    reindex(repo, parse_diff_output("R100\told.py\tnew.py"), store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_file_hash("old.py") is None
+    assert _chunks_for_file(reopened, "old.py") == []
+    assert reopened.get_file_hash("new.py") == file_hash(new_path)
+    assert [chunk["text"] for chunk in _chunks_for_file(reopened, "new.py")] == [
+        "print('renamed')\n"
+    ]
+
+
+def test_reindex_skips_unchanged_file_without_embedding(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = VectorStore.open(repo / ".qatool" / "index")
+    path = _seed_indexed_file(repo, store, "unchanged.py", "print('same')\n")
+    embedding_calls = []
+    monkeypatch.setattr(
+        "qatool.reindex.embed_texts",
+        lambda texts: embedding_calls.append(texts),
+    )
+
+    reindex(repo, parse_diff_output("M\tunchanged.py"), store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_file_hash("unchanged.py") == file_hash(path)
+    assert [chunk["text"] for chunk in _chunks_for_file(reopened, "unchanged.py")] == [
+        "print('same')\n"
+    ]
+    assert embedding_calls == []
 
 
 def _run_git(
