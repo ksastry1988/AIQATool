@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import subprocess
 import sys
 from pathlib import Path
 
@@ -112,6 +113,39 @@ def file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def repository_commit_state(repo_root: Path) -> tuple[str | None, str | None]:
+    try:
+        head_result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None, None
+    if head_result.returncode != 0:
+        return None, None
+    head_sha = head_result.stdout.strip() or None
+    if head_sha is None:
+        return None, None
+
+    try:
+        parent_result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--verify", "HEAD^"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return head_sha, None
+    parent_sha = parent_result.stdout.strip() if parent_result.returncode == 0 else None
+    return head_sha, parent_sha or None
+
+
+def current_commit_sha(repo_root: Path) -> str | None:
+    return repository_commit_state(repo_root)[0]
+
+
 def validate_repository_path(repo_root: Path) -> Path:
     if not repo_root.exists():
         raise ValueError(f"repository does not exist: {repo_root}")
@@ -208,6 +242,7 @@ def _index_file_batch(
 
 def index_repository(repo_root: Path, store: VectorStore) -> None:
     repo_root = validate_repository_path(repo_root)
+    indexed_commit_sha = current_commit_sha(repo_root)
 
     ignore_patterns = load_ignore_patterns(repo_root)
     candidates, errors = iter_candidate_files(repo_root, ignore_patterns)
@@ -282,3 +317,12 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
         f"{indexed_chunks} chunk(s), {deleted_files} deletion(s), "
         f"{len(errors)} error(s)"
     )
+    if not errors and indexed_commit_sha is not None:
+        if current_commit_sha(repo_root) == indexed_commit_sha:
+            store.set_indexed_commit_sha(indexed_commit_sha)
+        else:
+            print(
+                "[qatool] repository HEAD changed during indexing; "
+                "indexed commit marker was not updated",
+                file=sys.stderr,
+            )
