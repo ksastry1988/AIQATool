@@ -41,8 +41,9 @@ class FileChange:
 def parse_diff_output(diff_text: str | bytes) -> list[FileChange]:
     """Parse `git diff --name-status` output into FileChange objects.
 
-    `git diff --name-status -z` emits NUL-delimited entries so filenames with
-    spaces, tabs, and other special characters remain unambiguous.
+    Git emits either tab-delimited lines or NUL-delimited records when run with
+    `-z`. The NUL form preserves paths containing spaces, tabs, and other
+    special characters without ambiguity.
     """
     if isinstance(diff_text, bytes):
         diff_text = diff_text.decode("utf-8", errors="surrogateescape")
@@ -55,29 +56,28 @@ def parse_diff_output(diff_text: str | bytes) -> list[FileChange]:
         tokens = diff_text.split("\0")
         i = 0
         while i < len(tokens):
-            token = tokens[i]
+            status = tokens[i]
             i += 1
-            if not token:
+            if not status:
                 continue
 
-            status = token[0]
-            if status in {"R", "C"}:
+            if status.startswith("R") or status.startswith("C"):
                 if i + 1 >= len(tokens):
                     break
                 old_path = tokens[i]
-                i += 1
-                if i >= len(tokens):
+                new_path = tokens[i + 1]
+                if not old_path or not new_path:
                     break
-                new_path = tokens[i]
-                i += 1
                 changes.append(FileChange(status="R", path=old_path, new_path=new_path))
+                i += 2
                 continue
 
             if i >= len(tokens):
                 break
             path = tokens[i]
             i += 1
-            changes.append(FileChange(status=status, path=path))
+            if path:
+                changes.append(FileChange(status=status, path=path))
         return changes
 
     for line in diff_text.strip().splitlines():

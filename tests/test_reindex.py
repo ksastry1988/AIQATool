@@ -36,7 +36,7 @@ def test_parse_diff_output_handles_rename():
 
 
 def test_parse_diff_output_handles_space_and_special_char_paths():
-    diff_text = "M\tpath with spaces.py\0A\tname[1].txt\0R100\told name.py\tnew name.py\0"
+    diff_text = "M\0path with spaces.py\0A\0name[1].txt\0R100\0old name.py\0new name.py\0"
     changes = parse_diff_output(diff_text)
 
     assert [c.status for c in changes] == ["M", "A", "R"]
@@ -420,7 +420,7 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
     _run_git(repo, "commit", "-m", "initial import", env=env)
 
     first_argv = json.loads(argv_capture.read_text())
-    first_diff = diff_capture.read_text().splitlines()
+    first_diff = parse_diff_output(diff_capture.read_text())
     assert first_argv == [
         "reindex",
         "--repo",
@@ -428,9 +428,8 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
         "--changed-files",
         first_argv[4],
     ]
-    assert "A\ttracked.py" in first_diff
-    assert "A\told_name.py" in first_diff
-    assert "A\tremoved.txt" in first_diff
+    assert {change.path for change in first_diff} == {"tracked.py", "old_name.py", "removed.txt"}
+    assert {change.status for change in first_diff} == {"A"}
 
     (repo / "tracked.py").write_text("print('two')\n")
     _run_git(repo, "mv", "old_name.py", "new_name.py")
@@ -441,7 +440,7 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
     _run_git(repo, "commit", "-m", "update files", cwd=nested_dir, env=env)
 
     second_argv = json.loads(argv_capture.read_text())
-    second_diff = diff_capture.read_text().splitlines()
+    second_diff = parse_diff_output(diff_capture.read_text())
     assert second_argv == [
         "reindex",
         "--repo",
@@ -449,9 +448,12 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
         "--changed-files",
         second_argv[4],
     ]
-    assert "M\ttracked.py" in second_diff
-    assert "D\tremoved.txt" in second_diff
-    assert any(line.startswith("R") and line.endswith("\told_name.py\tnew_name.py") for line in second_diff)
+    assert any(change.status == "M" and change.path == "tracked.py" for change in second_diff)
+    assert any(change.status == "D" and change.path == "removed.txt" for change in second_diff)
+    assert any(
+        change.status == "R" and change.path == "old_name.py" and change.new_path == "new_name.py"
+        for change in second_diff
+    )
 
 
 def test_post_commit_hook_uses_first_parent_merge_diff(tmp_path):
@@ -476,7 +478,7 @@ def test_post_commit_hook_uses_first_parent_merge_diff(tmp_path):
     _run_git(repo, "commit", "-m", "merge feature", env=env)
 
     argv = json.loads(argv_capture.read_text())
-    diff_lines = diff_capture.read_text().splitlines()
+    changes = parse_diff_output(diff_capture.read_text())
 
     assert argv == [
         "reindex",
@@ -485,9 +487,8 @@ def test_post_commit_hook_uses_first_parent_merge_diff(tmp_path):
         "--changed-files",
         argv[4],
     ]
-    assert "A\tfeature_only.txt" in diff_lines
-    assert "A\tmain_only.txt" not in diff_lines
-    assert "M\tshared.txt" in diff_lines
+    assert {change.path for change in changes} == {"feature_only.txt", "shared.txt"}
+    assert {change.status for change in changes} == {"A", "M"}
 
 
 def test_post_commit_hook_handles_resolved_merge_commits(tmp_path):
@@ -523,7 +524,7 @@ def test_post_commit_hook_handles_resolved_merge_commits(tmp_path):
     _run_git(repo, "commit", "-m", "resolve merge", env=env)
 
     argv = json.loads(argv_capture.read_text())
-    diff_lines = diff_capture.read_text().splitlines()
+    changes = parse_diff_output(diff_capture.read_text())
 
     assert argv == [
         "reindex",
@@ -532,7 +533,9 @@ def test_post_commit_hook_handles_resolved_merge_commits(tmp_path):
         "--changed-files",
         argv[4],
     ]
-    assert diff_lines == ["M\tshared.txt"]
+    assert len(changes) == 1
+    assert changes[0].status == "M"
+    assert changes[0].path == "shared.txt"
 
 
 def test_post_commit_hook_invokes_reindex_for_empty_diff(tmp_path):
