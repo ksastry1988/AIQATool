@@ -5,6 +5,8 @@ qatool/chunking.py
 qatool/cli.py
 qatool/embeddings.py
 qatool/indexing.py
+qatool/lookup.py
+qatool/qa.py
 qatool/reindex.py
 qatool/vectorstore.py
 qatool.egg-info/PKG-INFO
@@ -14,6 +16,9 @@ qatool.egg-info/entry_points.txt
 qatool.egg-info/requires.txt
 qatool.egg-info/top_level.txt
 tests/test_chunking.py
+tests/test_chunking_languages.py
 tests/test_embeddings.py
 tests/test_indexing.py
+tests/test_lookup.py
+tests/test_qa.py
 tests/test_reindex.py
