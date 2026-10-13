@@ -35,6 +35,17 @@ def test_parse_diff_output_handles_rename():
     assert changes[0].new_path == "new_name.py"
 
 
+def test_parse_diff_output_handles_space_and_special_char_paths():
+    diff_text = "M\tpath with spaces.py\0A\tname[1].txt\0R100\told name.py\tnew name.py\0"
+    changes = parse_diff_output(diff_text)
+
+    assert [c.status for c in changes] == ["M", "A", "R"]
+    assert changes[0].path == "path with spaces.py"
+    assert changes[1].path == "name[1].txt"
+    assert changes[2].path == "old name.py"
+    assert changes[2].new_path == "new name.py"
+
+
 def test_reindex_deduplicates_overlapping_changed_paths(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -38,15 +38,54 @@ class FileChange:
     new_path: str | None = None  # set for renames
 
 
-def parse_diff_output(diff_text: str) -> list[FileChange]:
-    """Parse `git diff --name-status` output into FileChange objects."""
-    changes = []
+def parse_diff_output(diff_text: str | bytes) -> list[FileChange]:
+    """Parse `git diff --name-status` output into FileChange objects.
+
+    `git diff --name-status -z` emits NUL-delimited entries so filenames with
+    spaces, tabs, and other special characters remain unambiguous.
+    """
+    if isinstance(diff_text, bytes):
+        diff_text = diff_text.decode("utf-8", errors="surrogateescape")
+
+    changes: list[FileChange] = []
+    if not diff_text:
+        return changes
+
+    if "\0" in diff_text:
+        tokens = diff_text.split("\0")
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+            i += 1
+            if not token:
+                continue
+
+            status = token[0]
+            if status in {"R", "C"}:
+                if i + 1 >= len(tokens):
+                    break
+                old_path = tokens[i]
+                i += 1
+                if i >= len(tokens):
+                    break
+                new_path = tokens[i]
+                i += 1
+                changes.append(FileChange(status="R", path=old_path, new_path=new_path))
+                continue
+
+            if i >= len(tokens):
+                break
+            path = tokens[i]
+            i += 1
+            changes.append(FileChange(status=status, path=path))
+        return changes
+
     for line in diff_text.strip().splitlines():
         if not line.strip():
             continue
         parts = line.split("\t")
         status = parts[0][0]  # 'R100' -> 'R'
-        if status == "R":
+        if status in {"R", "C"}:
             changes.append(FileChange(status="R", path=parts[1], new_path=parts[2]))
         else:
             changes.append(FileChange(status=status, path=parts[1]))
