@@ -1,4 +1,4 @@
-# qatool
+# Q&A agent
 
 [![Coverage](https://github.com/ksastry1988/AIQATool/actions/workflows/coverage.yml/badge.svg?branch=main)](https://github.com/ksastry1988/AIQATool/actions/workflows/coverage.yml)
 
