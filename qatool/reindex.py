@@ -38,16 +38,69 @@ class FileChange:
     new_path: str | None = None  # set for renames
 
 
-def parse_diff_output(diff_text: str) -> list[FileChange]:
-    """Parse `git diff --name-status` output into FileChange objects."""
-    changes = []
+def parse_diff_output(diff_text: str | bytes) -> list[FileChange]:
+    """Parse `git diff --name-status` output into FileChange objects.
+
+    Git emits either tab-delimited lines or NUL-delimited records when run with
+    `-z`. The NUL form preserves paths containing spaces, tabs, and other
+    special characters without ambiguity.
+    """
+    if isinstance(diff_text, bytes):
+        diff_text = diff_text.decode("utf-8", errors="surrogateescape")
+
+    changes: list[FileChange] = []
+    if not diff_text:
+        return changes
+
+    if "\0" in diff_text:
+        tokens = diff_text.split("\0")
+        if tokens[-1] != "":
+            raise ValueError("malformed NUL-delimited diff: missing final NUL")
+        tokens.pop()
+        i = 0
+        while i < len(tokens):
+            status = tokens[i]
+            i += 1
+            if not status:
+                raise ValueError("malformed NUL-delimited diff: empty status")
+
+            if status.startswith(("R", "C")):
+                if len(status) < 2 or not status[1:].isdigit():
+                    raise ValueError(f"malformed NUL-delimited diff status: {status!r}")
+                if i + 1 >= len(tokens):
+                    raise ValueError("malformed NUL-delimited diff: incomplete path pair")
+                old_path = tokens[i]
+                new_path = tokens[i + 1]
+                if not old_path or not new_path:
+                    raise ValueError("malformed NUL-delimited diff: empty path")
+                if status.startswith("C"):
+                    changes.append(FileChange(status="A", path=new_path))
+                else:
+                    changes.append(FileChange(status="R", path=old_path, new_path=new_path))
+                i += 2
+                continue
+
+            if status not in {"A", "M", "D", "T", "U", "X", "B"}:
+                raise ValueError(f"malformed NUL-delimited diff status: {status!r}")
+            if i >= len(tokens):
+                raise ValueError("malformed NUL-delimited diff: missing path")
+            path = tokens[i]
+            i += 1
+            if not path:
+                raise ValueError("malformed NUL-delimited diff: empty path")
+            changes.append(FileChange(status=status, path=path))
+        return changes
+
     for line in diff_text.strip().splitlines():
         if not line.strip():
             continue
         parts = line.split("\t")
         status = parts[0][0]  # 'R100' -> 'R'
-        if status == "R":
-            changes.append(FileChange(status="R", path=parts[1], new_path=parts[2]))
+        if status in {"R", "C"}:
+            if status == "C":
+                changes.append(FileChange(status="A", path=parts[2]))
+            else:
+                changes.append(FileChange(status="R", path=parts[1], new_path=parts[2]))
         else:
             changes.append(FileChange(status=status, path=parts[1]))
     return changes
@@ -181,12 +234,12 @@ def main() -> None:
     try:
         repo_root = validate_repository_path(args.repo)
         require_existing_index(repo_root)
-        diff_text = args.changed_files.read_text()
+        diff_text = args.changed_files.read_bytes()
+        changes = parse_diff_output(diff_text)
     except (OSError, ValueError) as exc:
         print(f"[qatool] error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
-    changes = parse_diff_output(diff_text)
     store = VectorStore.open(repo_root / ".qatool" / "index")
     try:
         reindex(repo_root, changes, store)

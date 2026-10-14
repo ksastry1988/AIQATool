@@ -35,6 +35,53 @@ def test_parse_diff_output_handles_rename():
     assert changes[0].new_path == "new_name.py"
 
 
+@pytest.mark.parametrize(
+    "diff_text",
+    [
+        "C100\told_name.py\tcopy_name.py",
+        "C100\0old_name.py\0copy_name.py\0",
+    ],
+)
+def test_parse_diff_output_treats_copy_as_addition(diff_text):
+    changes = parse_diff_output(diff_text)
+
+    assert len(changes) == 1
+    assert changes[0].status == "A"
+    assert changes[0].path == "copy_name.py"
+    assert changes[0].new_path is None
+
+
+def test_parse_diff_output_handles_space_and_special_char_paths():
+    diff_text = "M\0path with spaces.py\0A\0name[1].txt\0R100\0old name.py\0new name.py\0"
+    changes = parse_diff_output(diff_text)
+
+    assert [c.status for c in changes] == ["M", "A", "R"]
+    assert changes[0].path == "path with spaces.py"
+    assert changes[1].path == "name[1].txt"
+    assert changes[2].path == "old name.py"
+    assert changes[2].new_path == "new name.py"
+
+
+@pytest.mark.parametrize(
+    "diff_text",
+    [
+        "M\0valid.py\0A\0",
+        "M\0valid.py\0R100\0old.py\0",
+        "M\0valid.py",
+    ],
+)
+def test_parse_diff_output_rejects_malformed_nul_records(diff_text):
+    with pytest.raises(ValueError, match="malformed NUL-delimited diff"):
+        parse_diff_output(diff_text)
+
+
+def test_parse_diff_output_preserves_non_utf8_path_bytes():
+    changes = parse_diff_output(b"M\0\xffname.py\0")
+
+    assert len(changes) == 1
+    assert changes[0].path == "\udcffname.py"
+
+
 def test_reindex_deduplicates_overlapping_changed_paths(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -166,6 +213,32 @@ def test_reindex_moves_renamed_file_chunks_and_hash(tmp_path, monkeypatch):
     assert reopened.get_file_hash("new.py") == file_hash(new_path)
     assert [chunk["text"] for chunk in _chunks_for_file(reopened, "new.py")] == [
         "print('renamed')\n"
+    ]
+
+
+def test_reindex_copy_preserves_source_and_indexes_destination(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = VectorStore.open(repo / ".qatool" / "index")
+    source_path = _seed_indexed_file(repo, store, "source.py", "print('copied')\n")
+    copied_path = repo / "copy.py"
+    shutil.copyfile(source_path, copied_path)
+    monkeypatch.setattr(
+        "qatool.reindex.chunk_file",
+        lambda full_path, rel_path: [
+            Chunk(text=full_path.read_text(), metadata={"file": rel_path})
+        ],
+    )
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    reindex(repo, parse_diff_output("C100\0source.py\0copy.py\0"), store)
+
+    reopened = VectorStore.open(repo / ".qatool" / "index")
+    assert reopened.get_file_hash("source.py") == file_hash(source_path)
+    assert _chunks_for_file(reopened, "source.py")
+    assert reopened.get_file_hash("copy.py") == file_hash(copied_path)
+    assert [chunk["text"] for chunk in _chunks_for_file(reopened, "copy.py")] == [
+        "print('copied')\n"
     ]
 
 
@@ -409,7 +482,7 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
     _run_git(repo, "commit", "-m", "initial import", env=env)
 
     first_argv = json.loads(argv_capture.read_text())
-    first_diff = diff_capture.read_text().splitlines()
+    first_diff = parse_diff_output(diff_capture.read_text())
     assert first_argv == [
         "reindex",
         "--repo",
@@ -417,9 +490,8 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
         "--changed-files",
         first_argv[4],
     ]
-    assert "A\ttracked.py" in first_diff
-    assert "A\told_name.py" in first_diff
-    assert "A\tremoved.txt" in first_diff
+    assert {change.path for change in first_diff} == {"tracked.py", "old_name.py", "removed.txt"}
+    assert {change.status for change in first_diff} == {"A"}
 
     (repo / "tracked.py").write_text("print('two')\n")
     _run_git(repo, "mv", "old_name.py", "new_name.py")
@@ -430,7 +502,7 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
     _run_git(repo, "commit", "-m", "update files", cwd=nested_dir, env=env)
 
     second_argv = json.loads(argv_capture.read_text())
-    second_diff = diff_capture.read_text().splitlines()
+    second_diff = parse_diff_output(diff_capture.read_text())
     assert second_argv == [
         "reindex",
         "--repo",
@@ -438,9 +510,12 @@ def test_post_commit_hook_invokes_reindex_with_repo_root_and_changed_files(tmp_p
         "--changed-files",
         second_argv[4],
     ]
-    assert "M\ttracked.py" in second_diff
-    assert "D\tremoved.txt" in second_diff
-    assert any(line.startswith("R") and line.endswith("\told_name.py\tnew_name.py") for line in second_diff)
+    assert any(change.status == "M" and change.path == "tracked.py" for change in second_diff)
+    assert any(change.status == "D" and change.path == "removed.txt" for change in second_diff)
+    assert any(
+        change.status == "R" and change.path == "old_name.py" and change.new_path == "new_name.py"
+        for change in second_diff
+    )
 
 
 def test_post_commit_hook_uses_first_parent_merge_diff(tmp_path):
@@ -465,7 +540,7 @@ def test_post_commit_hook_uses_first_parent_merge_diff(tmp_path):
     _run_git(repo, "commit", "-m", "merge feature", env=env)
 
     argv = json.loads(argv_capture.read_text())
-    diff_lines = diff_capture.read_text().splitlines()
+    changes = parse_diff_output(diff_capture.read_text())
 
     assert argv == [
         "reindex",
@@ -474,9 +549,8 @@ def test_post_commit_hook_uses_first_parent_merge_diff(tmp_path):
         "--changed-files",
         argv[4],
     ]
-    assert "A\tfeature_only.txt" in diff_lines
-    assert "A\tmain_only.txt" not in diff_lines
-    assert "M\tshared.txt" in diff_lines
+    assert {change.path for change in changes} == {"feature_only.txt", "shared.txt"}
+    assert {change.status for change in changes} == {"A", "M"}
 
 
 def test_post_commit_hook_handles_resolved_merge_commits(tmp_path):
@@ -512,7 +586,7 @@ def test_post_commit_hook_handles_resolved_merge_commits(tmp_path):
     _run_git(repo, "commit", "-m", "resolve merge", env=env)
 
     argv = json.loads(argv_capture.read_text())
-    diff_lines = diff_capture.read_text().splitlines()
+    changes = parse_diff_output(diff_capture.read_text())
 
     assert argv == [
         "reindex",
@@ -521,7 +595,9 @@ def test_post_commit_hook_handles_resolved_merge_commits(tmp_path):
         "--changed-files",
         argv[4],
     ]
-    assert diff_lines == ["M\tshared.txt"]
+    assert len(changes) == 1
+    assert changes[0].status == "M"
+    assert changes[0].path == "shared.txt"
 
 
 def test_post_commit_hook_invokes_reindex_for_empty_diff(tmp_path):
@@ -563,6 +639,63 @@ def test_reindex_main_requires_existing_local_index(tmp_path, monkeypatch, capsy
     error_output = capsys.readouterr().err
     assert "local index not found" in error_output
     assert str(repo / ".qatool" / "index" / "store.json") in error_output
+
+
+def test_reindex_main_reads_changed_files_as_bytes(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    changed_files = tmp_path / "changed.txt"
+    changed_files.write_bytes(b"M\0\xffname.py\0")
+    captured_changes = []
+    monkeypatch.setattr(sys, "argv", [
+        "qatool-reindex",
+        "--repo",
+        str(repo),
+        "--changed-files",
+        str(changed_files),
+    ])
+    monkeypatch.setattr("qatool.reindex.validate_repository_path", lambda path: path)
+    monkeypatch.setattr("qatool.reindex.require_existing_index", lambda path: path)
+    monkeypatch.setattr("qatool.reindex.VectorStore.open", lambda path: object())
+    monkeypatch.setattr(
+        "qatool.reindex.reindex",
+        lambda repo_root, changes, store: captured_changes.extend(changes),
+    )
+
+    reindex_main()
+
+    assert len(captured_changes) == 1
+    assert captured_changes[0].path == "\udcffname.py"
+
+
+def test_reindex_main_reports_malformed_diff_without_reindexing(
+    tmp_path, monkeypatch, capsys
+):
+    repo = tmp_path / "repo"
+    changed_files = tmp_path / "changed.txt"
+    changed_files.write_bytes(b"M\0valid.py\0A\0")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "qatool-reindex",
+            "--repo",
+            str(repo),
+            "--changed-files",
+            str(changed_files),
+        ],
+    )
+    monkeypatch.setattr("qatool.reindex.validate_repository_path", lambda path: path)
+    monkeypatch.setattr("qatool.reindex.require_existing_index", lambda path: path)
+    monkeypatch.setattr(
+        "qatool.reindex.reindex",
+        lambda *args: pytest.fail("malformed diff must not be reindexed"),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        reindex_main()
+
+    assert exc_info.value.code == 2
+    assert "malformed NUL-delimited diff" in capsys.readouterr().err
 
 
 def test_reindex_main_persists_commit_sha_for_empty_diff(tmp_path, monkeypatch):
