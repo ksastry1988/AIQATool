@@ -150,6 +150,14 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
             continue
         to_process.append((rel_path, path, new_hash))
 
+    for rel_path in sorted(deleted):
+        print(f"[qatool] removing {rel_path}")
+    for rel_path, _, _ in to_process:
+        print(f"[qatool] reindexing {rel_path}")
+    skipped = len(added_or_modified) - len(to_process)
+    if skipped:
+        print(f"[qatool] skipped {skipped} unchanged file(s)")
+
     if not to_process:
         print(f"[qatool] nothing to re-embed ({len(deleted)} deletions applied)")
         _commit_reindex(
@@ -164,7 +172,10 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
     # Prepare all replacements before applying any changes to the store.
     all_chunks = []
     for rel_path, full_path, new_hash in to_process:
-        chunks = chunk_file(full_path, rel_path)  # -> list[Chunk(text, metadata)]
+        try:
+            chunks = chunk_file(full_path, rel_path)  # -> list[Chunk(text, metadata)]
+        except Exception as exc:
+            raise RuntimeError(f"failed to chunk {rel_path}: {exc}") from exc
         all_chunks.append((rel_path, chunks, new_hash))
 
     total_chunks = sum(len(chunks) for _, chunks, _ in all_chunks)
