@@ -189,55 +189,58 @@ def _index_file_batch(
     total_files: int,
 ) -> tuple[int, int, int]:
     prepared: list[tuple[str, str, list]] = []
-    indexed_files = 0
-    indexed_chunks = 0
-    deleted_files = 0
+    vanished: set[str] = set()
 
     for offset, (rel_path, full_path, new_hash) in enumerate(batch):
         print(f"[qatool] indexing {start_index + offset + 1}/{total_files}: {rel_path}")
         try:
             chunks = chunk_file(full_path, rel_path)
         except FileNotFoundError:
-            store.delete_by_file(rel_path)
-            deleted_files += 1
+            vanished.add(rel_path)
         except Exception as exc:  # pragma: no cover - defensive boundary
             errors.append(f"{rel_path}: failed to index file ({exc})")
         else:
             prepared.append((rel_path, new_hash, chunks))
 
-    if not prepared:
-        return indexed_files, indexed_chunks, deleted_files
-
-    try:
-        flattened_chunks = [chunk for _, _, chunks in prepared for chunk in chunks]
-        vectors = _embed_chunks(flattened_chunks)
-    except Exception as exc:
-        print(
-            f"[qatool] batch embedding failed for {len(prepared)} file(s); "
-            f"retrying individually ({exc})",
-            file=sys.stderr,
-        )
-        for rel_path, new_hash, chunks in prepared:
-            try:
-                store.replace_file(rel_path, new_hash, chunks, _embed_chunks(chunks))
-                indexed_files += 1
-                indexed_chunks += len(chunks)
-            except Exception as exc:  # pragma: no cover - defensive boundary
-                errors.append(f"{rel_path}: failed to index file ({exc})")
-        return indexed_files, indexed_chunks, deleted_files
-
-    vector_offset = 0
-    for rel_path, new_hash, chunks in prepared:
-        next_offset = vector_offset + len(chunks)
+    replacements: list[tuple[str, str, list, list[list[float]]]] = []
+    if prepared:
         try:
-            store.replace_file(rel_path, new_hash, chunks, vectors[vector_offset:next_offset])
-            indexed_files += 1
-            indexed_chunks += len(chunks)
-        except Exception as exc:  # pragma: no cover - defensive boundary
-            errors.append(f"{rel_path}: failed to index file ({exc})")
-        vector_offset = next_offset
+            flattened_chunks = [chunk for _, _, chunks in prepared for chunk in chunks]
+            vectors = _embed_chunks(flattened_chunks)
+            offset = 0
+            for rel_path, new_hash, chunks in prepared:
+                replacements.append(
+                    (rel_path, new_hash, chunks, vectors[offset:offset + len(chunks)])
+                )
+                offset += len(chunks)
+        except Exception as exc:
+            print(
+                f"[qatool] batch embedding failed for {len(prepared)} file(s); "
+                f"retrying individually ({exc})",
+                file=sys.stderr,
+            )
+            for rel_path, new_hash, chunks in prepared:
+                try:
+                    replacements.append((rel_path, new_hash, chunks, _embed_chunks(chunks)))
+                except Exception as file_exc:  # pragma: no cover - defensive boundary
+                    errors.append(f"{rel_path}: failed to index file ({file_exc})")
 
-    return indexed_files, indexed_chunks, deleted_files
+    if not replacements and not vanished:
+        return 0, 0, 0
+
+    # One atomic write per batch; a failure leaves the previous index intact.
+    try:
+        store.apply_file_changes(replacements, vanished)
+    except Exception as exc:
+        for rel_path, _, _, _ in replacements:
+            errors.append(f"{rel_path}: failed to index file ({exc})")
+        return 0, 0, 0
+
+    return (
+        len(replacements),
+        sum(len(chunks) for _, _, chunks, _ in replacements),
+        len(vanished),
+    )
 
 
 def index_repository(repo_root: Path, store: VectorStore) -> None:
@@ -292,9 +295,9 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
         indexed_chunks += batch_indexed_chunks
         deleted_files += batch_deleted_files
 
-    for rel_path in stale_files:
-        store.delete_by_file(rel_path)
-        deleted_files += 1
+    if stale_files:
+        store.apply_file_changes([], set(stale_files))
+        deleted_files += len(stale_files)
 
     final_candidates, final_errors = iter_candidate_files(repo_root, ignore_patterns)
     errors.extend(final_errors)
@@ -304,9 +307,10 @@ def index_repository(repo_root: Path, store: VectorStore) -> None:
     }
     final_error_paths = {error.split(":", 1)[0] for error in final_errors}
 
-    for rel_path in sorted(set(current_files) - final_current_files - final_error_paths):
-        store.delete_by_file(rel_path)
-        deleted_files += 1
+    removed_during_index = set(current_files) - final_current_files - final_error_paths
+    if removed_during_index:
+        store.apply_file_changes([], removed_during_index)
+        deleted_files += len(removed_during_index)
 
     if errors:
         for error in errors:
