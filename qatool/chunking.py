@@ -405,6 +405,9 @@ def chunk_file(full_path: Path, rel_path: str) -> list[Chunk]:
     """
     text = full_path.read_text(errors="ignore")
     ext = full_path.suffix.lstrip(".")
+    if not text.strip():
+        # Nothing to embed; providers such as Voyage reject empty inputs.
+        return []
 
     chunks = extract_chunks_tree_sitter(text, ext, rel_path)
     if chunks is not None:

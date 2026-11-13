@@ -47,18 +47,17 @@ class TestChunkFile:
             path.unlink()
 
     def test_chunk_empty_file(self):
-        """Empty file should produce a single empty chunk."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-            f.write("")
-            f.flush()
-            path = Path(f.name)
+        """Empty or whitespace-only files produce no chunks (nothing to embed)."""
+        for content, suffix in (("", ".py"), ("  \n\n\t\n", ".txt")):
+            with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
+                f.write(content)
+                f.flush()
+                path = Path(f.name)
 
-        try:
-            chunks = chunk_file(path, "empty.py")
-            assert len(chunks) == 1
-            assert chunks[0].text == ""
-        finally:
-            path.unlink()
+            try:
+                assert chunk_file(path, "empty" + suffix) == []
+            finally:
+                path.unlink()
 
     def test_chunk_preserves_file_content(self):
         """Chunking should preserve all file content."""

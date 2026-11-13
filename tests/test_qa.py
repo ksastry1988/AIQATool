@@ -206,6 +206,17 @@ def test_claude_client_reports_http_errors(monkeypatch):
         qa.ClaudeModelClient(api_key="test-key").generate("question", "context")
 
 
+def test_claude_client_includes_api_error_message(monkeypatch):
+    body = b'{"type": "error", "error": {"type": "not_found_error", "message": "model: bogus"}}'
+
+    def fail_request(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 404, "not found", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(qa.urllib.request, "urlopen", fail_request)
+    with pytest.raises(qa.AskError, match="HTTP 404: model: bogus"):
+        qa.ClaudeModelClient(api_key="test-key").generate("question", "context")
+
+
 def test_claude_client_reports_connection_errors(monkeypatch):
     def fail_request(request, timeout):
         raise urllib.error.URLError("offline")

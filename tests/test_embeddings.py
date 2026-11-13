@@ -11,6 +11,7 @@ from qatool.embeddings import (
     VoyageEmbeddingProvider,
     embed_texts,
     get_embedding_provider,
+    load_embedding_config,
 )
 
 
@@ -298,3 +299,13 @@ def test_voyage_provider_rejects_non_numeric_embedding_values(monkeypatch):
     with pytest.raises(EmbeddingError) as exc_info:
         provider.embed_batch(["alpha", "beta"])
     assert "non-numeric embedding value" in str(exc_info.value)
+
+
+def test_embedding_config_repr_hides_api_key(monkeypatch):
+    monkeypatch.setenv("VOYAGE_API_KEY", "super-secret-voyage-key")
+    monkeypatch.delenv("QATOOL_EMBEDDING_API_KEY", raising=False)
+
+    config = load_embedding_config()
+
+    assert config.api_key == "super-secret-voyage-key"
+    assert "super-secret-voyage-key" not in repr(config)

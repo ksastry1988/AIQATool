@@ -96,7 +96,8 @@ prints an answer with source citations (file and line range). It requires
 `ANTHROPIC_API_KEY`. Set `QATOOL_MODEL` to override the default Claude model.
 Prompt context is bounded by `QATOOL_MAX_CONTEXT_CHARS` (default 24000);
 lower-ranked chunks are dropped or truncated to fit. `QATOOL_MAX_OUTPUT_TOKENS`
-(default 1024) caps the answer length.
+(default 8192) caps the answer length. The model's reasoning counts toward this
+limit, so values much below a few thousand can cut answers off.
 
 ## Local index location
 
@@ -154,7 +155,7 @@ variable names below (API keys are rejected in the file; use the environment).
 | Setting | Default | Description |
 | --- | --- | --- |
 | `QATOOL_CONFIG` | unset | Path to a config file (environment only) |
-| `QATOOL_MODEL` | `claude-3-5-sonnet-latest` | Claude model for `ask` |
+| `QATOOL_MODEL` | `claude-opus-5-5` | Claude model for `ask` |
 | `QATOOL_TOP_K` | `8` | Chunks retrieved by `ask` (`--top-k` overrides) |
 | `QATOOL_INDEX_PATH` | `.qatool/index` | Vector store directory; relative paths are under the repo. Must be under `.qatool` or outside the repo (otherwise rejected) |
 | `QATOOL_EMBEDDING_PROVIDER` | `mock` | `mock` or `voyage` |

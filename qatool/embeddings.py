@@ -11,7 +11,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from numbers import Real
 from typing import Protocol
 
@@ -49,7 +49,7 @@ class EmbeddingConfig:
     provider_name: str
     model: str
     endpoint: str
-    api_key: str | None
+    api_key: str | None = field(repr=False)
     batch_size: int
     max_retries: int
     retry_base_delay_seconds: float

@@ -36,6 +36,30 @@ def test_index_repository_respects_ignore_rules_and_secret_files(tmp_path, monke
     assert captured_inputs == [["def keep():\n    return 1\n"]]
 
 
+def test_index_repository_never_embeds_empty_text_for_blank_files(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "keep.py").write_text("def keep():\n    return 1\n")
+    (repo / "__init__.py").write_text("")
+    (repo / "blank.txt").write_text("\n   \n")
+
+    captured_inputs: list[str] = []
+
+    def fake_embed_texts(texts: list[str]) -> list[list[float]]:
+        captured_inputs.extend(texts)
+        return [[1.0] for _ in texts]
+
+    monkeypatch.setattr("qatool.indexing.embed_texts", fake_embed_texts)
+
+    store = VectorStore.open(repo / ".qatool" / "index")
+    index_repository(repo, store)
+
+    assert all(text.strip() for text in captured_inputs)
+    persisted = json.loads((repo / ".qatool" / "index" / "store.json").read_text())
+    assert {"__init__.py", "blank.txt", "keep.py"} <= set(persisted["file_hashes"])
+    assert {chunk["metadata"]["file"] for chunk in persisted["chunks"]} == {"keep.py"}
+
+
 def test_index_repository_skips_unchanged_files_on_repeat_runs(tmp_path, monkeypatch, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
