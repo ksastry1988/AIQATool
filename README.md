@@ -32,6 +32,7 @@ retrieved, language-aware code chunks.
 
    ```bash
    qatool index /path/to/repo
+   echo ".qatool/" >> /path/to/repo/.gitignore   # keep the index out of commits
    ```
 
 4. **Enable the post-commit hook** so the index stays fresh (see
@@ -104,7 +105,7 @@ with `QATOOL_INDEX_PATH`, which must be under `.qatool` or outside the repo).
 It is created by `qatool index`, never uploaded by qatool itself (chunk text
 is sent to the embedding provider while indexing, and retrieved chunks are
 sent to Claude when asking). Add `.qatool/` to your repository's
-`.gitignore`. To start over, delete the `.qatool/index` directory and run
+`.gitignore`; otherwise the index files get committed and the hook reindexes them. To start over, delete the `.qatool/index` directory and run
 `qatool index` again.
 
 ## Supported languages and limitations
