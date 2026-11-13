@@ -96,7 +96,8 @@ prints an answer with source citations (file and line range). It requires
 `ANTHROPIC_API_KEY`. Set `QATOOL_MODEL` to override the default Claude model.
 Prompt context is bounded by `QATOOL_MAX_CONTEXT_CHARS` (default 24000);
 lower-ranked chunks are dropped or truncated to fit. `QATOOL_MAX_OUTPUT_TOKENS`
-(default 1024) caps the answer length.
+(default 8192) caps the answer length. The model's reasoning counts toward this
+limit, so values much below a few thousand can cut answers off.
 
 ## Local index location
 
