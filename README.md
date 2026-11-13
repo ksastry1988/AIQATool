@@ -84,6 +84,18 @@ clear message telling you to run `qatool index` first.
 Copy `.qatoolignore.example` to `.qatoolignore` in the root of any
 repo you index, and adjust the patterns.
 
+Syntax (one pattern per line, `#` starts a comment, paths relative to repo root):
+
+- `name` matches a file or directory with that name at any depth
+- `dir/` matches a directory and everything beneath it
+- `*.log`, `docs/*.md` are glob patterns matched against the relative path
+
+Secret-like files (`.env*` except `*.example`/`*.sample`/`*.template`, `*.pem`,
+`*.key`, `credentials.json`, `*.tfstate`, `*.tfvars`, ...) and generated files
+(lockfiles, `*.min.js`, `dist/`, `build/`, ...) are excluded by default. The
+same rules apply to `qatool index` and `qatool reindex`; a file that becomes
+ignored is removed from the index on its next reindex.
+
 ## Tests
 
 ```bash

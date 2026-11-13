@@ -137,6 +137,8 @@ def reindex(repo_root: Path, changes: list[FileChange], store: VectorStore) -> N
         if not full_path.exists():
             continue  # file was deleted after the diff was captured
         if not should_index(full_path, repo_root, ignore_patterns):
+            # Drop chunks indexed before the file became ignored.
+            deleted.add(target)
             continue
 
         added_or_modified[target] = full_path

@@ -11,7 +11,13 @@ from .embeddings import embed_texts
 from .vectorstore import VectorStore
 
 IGNORED_SUFFIXES = {".lock", ".png", ".jpg", ".svg", ".pyc"}
-IGNORED_NAME_SUFFIXES = (".min.js", ".map")
+IGNORED_NAME_SUFFIXES = (".min.js", ".min.css", ".map")
+GENERATED_FILENAMES = {
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "npm-shrinkwrap.json",
+}
 IGNORED_DIRECTORIES = {
     ".git",
     ".hg",
@@ -21,6 +27,13 @@ IGNORED_DIRECTORIES = {
     ".pytest_cache",
     "__pycache__",
     "node_modules",
+    ".venv",
+    "venv",
+    ".tox",
+    ".next",
+    "dist",
+    "build",
+    "coverage_html",
 }
 IGNORE_FILE = ".qatoolignore"
 INDEX_FILE_BATCH_SIZE = 32
@@ -33,8 +46,21 @@ SECRET_FILENAMES = {
     "id_rsa",
     "id_dsa",
     "id_ed25519",
+    "id_ecdsa",
+    ".netrc",
+    ".pgpass",
+    ".htpasswd",
+    "credentials.json",
+    "service-account.json",
+    "secrets.json",
+    "secrets.yml",
+    "secrets.yaml",
 }
+SECRET_NAME_PATTERNS = (".env.*", "*.tfstate", "*.tfvars", "*.secret", "*.secrets")
+SECRET_TEMPLATE_SUFFIXES = (".example", ".sample", ".template")
 SECRET_SUFFIXES = {
+    ".p8",
+    ".ppk",
     ".key",
     ".pem",
     ".p12",
@@ -45,6 +71,17 @@ SECRET_SUFFIXES = {
     ".jks",
     ".keystore",
 }
+
+
+def is_secret_file(path: Path) -> bool:
+    name = path.name.lower()
+    if name.endswith(SECRET_TEMPLATE_SUFFIXES):
+        return False
+    return (
+        name in SECRET_FILENAMES
+        or path.suffix.lower() in SECRET_SUFFIXES
+        or any(fnmatch.fnmatch(name, pattern) for pattern in SECRET_NAME_PATTERNS)
+    )
 
 
 def load_ignore_patterns(repo_root: Path) -> set[str]:
@@ -102,7 +139,7 @@ def should_index(path: Path, repo_root: Path, ignore_patterns: set[str]) -> bool
         return False
     if path.name.endswith(IGNORED_NAME_SUFFIXES):
         return False
-    if path.name in SECRET_FILENAMES or path.suffix in SECRET_SUFFIXES:
+    if path.name in GENERATED_FILENAMES or is_secret_file(path):
         return False
     if any(_matches_ignore_pattern(rel_path, pattern) for pattern in ignore_patterns):
         return False
