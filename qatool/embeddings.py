@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from numbers import Real
 from typing import Protocol
 
+from .config import lookup
+
 
 DEFAULT_EMBEDDING_BATCH_SIZE = 128
 DEFAULT_MAX_RETRIES = 2
@@ -62,8 +64,13 @@ class EmbeddingRuntimeConfig:
     retry_base_delay_seconds: float
 
 
+def lookup_default(name: str, default: str) -> str:
+    value = lookup(name)
+    return default if value is None else value
+
+
 def _read_int_env(name: str, default: int, minimum: int = 1) -> int:
-    raw_value = os.getenv(name)
+    raw_value = lookup(name)
     if raw_value is None:
         return default
     try:
@@ -78,7 +85,7 @@ def _read_int_env(name: str, default: int, minimum: int = 1) -> int:
 
 
 def _read_float_env(name: str, default: float, minimum: float = 0.0) -> float:
-    raw_value = os.getenv(name)
+    raw_value = lookup(name)
     if raw_value is None:
         return default
     try:
@@ -93,11 +100,11 @@ def _read_float_env(name: str, default: float, minimum: float = 0.0) -> float:
 
 
 def load_embedding_config() -> EmbeddingConfig:
-    provider_name = os.getenv("QATOOL_EMBEDDING_PROVIDER", "mock").strip().lower()
+    provider_name = lookup_default("QATOOL_EMBEDDING_PROVIDER", "mock").strip().lower()
     return EmbeddingConfig(
         provider_name=provider_name,
-        model=os.getenv("QATOOL_EMBEDDING_MODEL", DEFAULT_VOYAGE_MODEL),
-        endpoint=os.getenv("QATOOL_EMBEDDING_ENDPOINT", DEFAULT_VOYAGE_ENDPOINT),
+        model=lookup_default("QATOOL_EMBEDDING_MODEL", DEFAULT_VOYAGE_MODEL),
+        endpoint=lookup_default("QATOOL_EMBEDDING_ENDPOINT", DEFAULT_VOYAGE_ENDPOINT),
         api_key=os.getenv("QATOOL_EMBEDDING_API_KEY") or os.getenv("VOYAGE_API_KEY"),
         batch_size=_read_int_env("QATOOL_EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE),
         max_retries=_read_int_env("QATOOL_EMBEDDING_MAX_RETRIES", DEFAULT_MAX_RETRIES, minimum=0),

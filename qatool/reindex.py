@@ -20,6 +20,7 @@ from pathlib import Path
 
 # Swap these for your real implementations.
 from .chunking import chunk_file          # tree-sitter based, function/class-level chunks
+from .config import load_settings
 from .embeddings import embed_texts       # batched embedding calls
 from .indexing import (
     file_hash,
@@ -225,8 +226,10 @@ def _commit_reindex(
     store.apply_file_changes(replacements, deletions, target_commit_sha)
 
 
-def require_existing_index(repo_root: Path) -> Path:
-    index_path = repo_root / ".qatool" / "index" / VectorStore.STORE_FILENAME
+def require_existing_index(repo_root: Path, index_dir: Path | None = None) -> Path:
+    if index_dir is None:
+        index_dir = repo_root / ".qatool" / "index"
+    index_path = index_dir / VectorStore.STORE_FILENAME
     if not index_path.exists():
         raise ValueError(
             f"local index not found at {index_path}; run `qatool index {repo_root}` first"
@@ -246,14 +249,15 @@ def main() -> None:
     args = parser.parse_args()
     try:
         repo_root = validate_repository_path(args.repo)
-        require_existing_index(repo_root)
+        settings = load_settings(repo_root)
+        require_existing_index(repo_root, settings.index_path)
         diff_text = args.changed_files.read_bytes()
         changes = parse_diff_output(diff_text)
     except (OSError, ValueError) as exc:
         print(f"[qatool] error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
-    store = VectorStore.open(repo_root / ".qatool" / "index")
+    store = VectorStore.open(settings.index_path)
     try:
         reindex(repo_root, changes, store)
     except Exception as exc:

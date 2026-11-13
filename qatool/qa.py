@@ -9,6 +9,7 @@ import urllib.request
 from typing import Protocol
 from pathlib import Path
 
+from .config import load_settings, lookup
 from .embeddings import embed_texts
 from .indexing import validate_repository_path
 from .lookup import extract_query_terms, merge_results
@@ -45,7 +46,7 @@ class ClaudeModelClient:
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise AskError("Claude requires an API key via ANTHROPIC_API_KEY")
-        self.model = model or os.getenv("QATOOL_MODEL", DEFAULT_ANTHROPIC_MODEL)
+        self.model = model or lookup("QATOOL_MODEL") or DEFAULT_ANTHROPIC_MODEL
         self.endpoint = endpoint
 
     def generate(self, question: str, context: str) -> str:
@@ -125,14 +126,14 @@ def format_retrieved_chunks(chunks: list[dict]) -> str:
 def ask_question(
     repo_root: Path,
     question: str,
-    top_k: int = 8,
+    top_k: int | None = None,
     model_client: ModelClient | None = None,
 ) -> str:
     """Retrieve relevant indexed chunks and answer a question using Claude."""
-    if top_k <= 0:
-        raise ValueError("top_k must be positive")
     repo_root = validate_repository_path(repo_root)
-    index_path = repo_root / ".qatool" / "index"
+    settings = load_settings(repo_root, top_k=top_k)
+    top_k = settings.top_k
+    index_path = settings.index_path
     store_file = index_path / VectorStore.STORE_FILENAME
     if not store_file.exists():
         raise AskError(f"local index not found at {store_file}; run `qatool index {repo_root}` first")
@@ -149,7 +150,7 @@ def ask_question(
         return "No relevant results found in the local index."
 
     context = format_retrieved_chunks(results)
-    client = model_client or ClaudeModelClient()
+    client = model_client or ClaudeModelClient(model=settings.llm_model)
     answer = client.generate(question, context).strip()
     if not answer:
         raise AskError("Claude returned an empty answer")

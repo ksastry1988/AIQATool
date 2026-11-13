@@ -653,8 +653,8 @@ def test_reindex_main_reads_changed_files_as_bytes(tmp_path, monkeypatch):
         "--changed-files",
         str(changed_files),
     ])
-    monkeypatch.setattr("qatool.reindex.validate_repository_path", lambda path: path)
-    monkeypatch.setattr("qatool.reindex.require_existing_index", lambda path: path)
+    monkeypatch.setattr("qatool.reindex.validate_repository_path", lambda path, index_dir=None: path)
+    monkeypatch.setattr("qatool.reindex.require_existing_index", lambda path, index_dir=None: path)
     monkeypatch.setattr("qatool.reindex.VectorStore.open", lambda path: object())
     monkeypatch.setattr(
         "qatool.reindex.reindex",
@@ -684,8 +684,8 @@ def test_reindex_main_reports_malformed_diff_without_reindexing(
             str(changed_files),
         ],
     )
-    monkeypatch.setattr("qatool.reindex.validate_repository_path", lambda path: path)
-    monkeypatch.setattr("qatool.reindex.require_existing_index", lambda path: path)
+    monkeypatch.setattr("qatool.reindex.validate_repository_path", lambda path, index_dir=None: path)
+    monkeypatch.setattr("qatool.reindex.require_existing_index", lambda path, index_dir=None: path)
     monkeypatch.setattr(
         "qatool.reindex.reindex",
         lambda *args: pytest.fail("malformed diff must not be reindexed"),

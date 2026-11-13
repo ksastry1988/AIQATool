@@ -39,6 +39,38 @@ retrieved context to Claude, returns an answer with source citations, and
 requires `ANTHROPIC_API_KEY`. Set `QATOOL_MODEL` to override the default Claude
 model.
 
+## Configuration
+
+`index`, `reindex`, and `ask` all resolve settings through `qatool/config.py`,
+so they behave consistently. Precedence: CLI flags > environment variables >
+config file > defaults. Invalid settings fail fast with exit code 2 and a
+message naming the setting; secret values are never printed.
+
+The optional config file is JSON, read from `$QATOOL_CONFIG`, else
+`<repo>/.qatool/config.json`, else `<repo>/qatool.json`. Keys are the
+variable names below (API keys are rejected in the file; use the environment).
+
+```json
+{"QATOOL_TOP_K": 5, "QATOOL_INDEX_PATH": ".qatool/index", "QATOOL_EMBEDDING_PROVIDER": "mock"}
+```
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `QATOOL_CONFIG` | unset | Path to a config file (environment only) |
+| `QATOOL_MODEL` | `claude-3-5-sonnet-latest` | Claude model for `ask` |
+| `QATOOL_TOP_K` | `8` | Chunks retrieved by `ask` (`--top-k` overrides) |
+| `QATOOL_INDEX_PATH` | `.qatool/index` | Vector store directory; relative paths are under the repo. Must be under `.qatool` or outside the repo (otherwise rejected) |
+| `QATOOL_EMBEDDING_PROVIDER` | `mock` | `mock` or `voyage` |
+| `QATOOL_EMBEDDING_MODEL` | `voyage-3-large` | Embedding model |
+| `QATOOL_EMBEDDING_ENDPOINT` | Voyage endpoint | Embedding API URL |
+| `QATOOL_EMBEDDING_BATCH_SIZE` | `128` | Texts per embedding request |
+| `QATOOL_EMBEDDING_MAX_RETRIES` | `2` | Retries for failed requests |
+| `QATOOL_EMBEDDING_RETRY_BASE_DELAY_SECONDS` | `0.5` | Retry backoff base |
+| `QATOOL_EMBEDDING_TIMEOUT_SECONDS` | `30` | Request timeout |
+| `QATOOL_MOCK_EMBEDDING_DIMENSION` | `32` | Mock vector size |
+| `ANTHROPIC_API_KEY` | required for `ask` | Secret; environment only |
+| `QATOOL_EMBEDDING_API_KEY` / `VOYAGE_API_KEY` | required for `voyage` | Secret; environment only |
+
 ## Docker
 
 Build the image from the repository root:
