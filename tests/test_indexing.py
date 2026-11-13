@@ -502,3 +502,37 @@ def test_index_repository_batch_write_failure_leaves_index_unchanged(tmp_path, m
     assert "a.py: failed to index file (disk full)" in err
     assert "b.py: failed to index file (disk full)" in err
     assert VectorStore.open(repo / ".qatool" / "index").list_indexed_files() == set()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env",
+        ".env.staging",
+        "deploy/server.pem",
+        "id_ecdsa",
+        "credentials.json",
+        "infra/prod.tfvars",
+        "terraform.tfstate",
+        "package-lock.json",
+        "static/app.min.css",
+        "dist/bundle.js",
+    ],
+)
+def test_should_index_excludes_secret_and_generated_files_by_default(tmp_path, name):
+    from qatool.indexing import should_index
+
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("value = 1\n")
+
+    assert not should_index(path, tmp_path, set())
+
+
+def test_should_index_keeps_env_templates(tmp_path):
+    from qatool.indexing import should_index
+
+    path = tmp_path / ".env.example"
+    path.write_text("API_KEY=\n")
+
+    assert should_index(path, tmp_path, set())

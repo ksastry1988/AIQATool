@@ -1,0 +1,17 @@
+# Copy to .qatoolignore in the repository root. One pattern per line.
+# Lines starting with '#' are comments; paths are relative to the repo root.
+#
+# Pattern syntax:
+#   name            matches any file or directory with that name at any depth
+#   dir/            matches a directory and everything beneath it
+#   *.log           glob (fnmatch) matched against the full relative path
+#   docs/*.md       glob with a path component
+#
+# Secret-like files (.env*, *.pem, *.key, credentials.json, *.tfstate, ...) and
+# generated files (lockfiles, *.min.js, dist/, build/, ...) are always excluded;
+# .qatoolignore only adds repo-specific exclusions.
+
+fixtures/
+*.snap
+legacy/generated/*
+internal-notes.md

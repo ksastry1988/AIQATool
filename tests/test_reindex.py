@@ -799,3 +799,22 @@ def test_vector_store_persist_failure_leaves_no_temp_files(tmp_path, monkeypatch
 
     assert list((tmp_path / "index").glob("*.tmp")) == []
     assert VectorStore.open(tmp_path / "index").get_file_hash("b.py") is None
+
+
+def test_reindex_applies_same_exclusions_and_drops_newly_ignored_files(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = VectorStore.open(repo / ".qatool" / "index")
+    _seed_indexed_file(repo, store, "was_indexed.py", "x = 1\n")
+    (repo / ".qatoolignore").write_text("was_indexed.py\n")
+    (repo / ".env.production").write_text("KEY=secret\n")
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    reindex(
+        repo,
+        parse_diff_output("M\twas_indexed.py\nA\t.env.production\n"),
+        store,
+    )
+
+    assert _chunks_for_file(store, "was_indexed.py") == []
+    assert _chunks_for_file(store, ".env.production") == []
