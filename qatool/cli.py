@@ -12,15 +12,17 @@ from pathlib import Path
 
 
 def cmd_index(args: argparse.Namespace) -> None:
+    from .config import load_settings
     from .indexing import index_repository, validate_repository_path
     from .vectorstore import VectorStore
 
     try:
         repo = validate_repository_path(args.repo)
+        settings = load_settings(repo)
     except ValueError as exc:
         print(f"[qatool] error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-    store = VectorStore.open(repo / ".qatool" / "index")
+    store = VectorStore.open(settings.index_path)
     index_repository(repo, store)
 
 
@@ -70,7 +72,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ask = sub.add_parser("ask", help="Ask a question about the codebase")
     p_ask.add_argument("question")
     p_ask.add_argument("--repo", type=Path, default=Path.cwd())
-    p_ask.add_argument("--top-k", type=_positive_int, default=8)
+    p_ask.add_argument("--top-k", type=_positive_int, default=None,
+                       help="chunks to retrieve (default: QATOOL_TOP_K or 8)")
     p_ask.set_defaults(func=cmd_ask)
 
     return parser
