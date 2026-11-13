@@ -173,7 +173,7 @@ def test_claude_client_sends_context_and_extracts_text(monkeypatch):
     assert captured["timeout"] == 30
     assert sent_payload["model"] == "test-model"
     assert "retrieved context" in sent_payload["messages"][0]["content"]
-    assert "only the supplied retrieved context" in sent_payload["system"]
+    assert "only the retrieved context" in sent_payload["system"]
 
 
 @pytest.mark.parametrize(
@@ -263,3 +263,31 @@ def test_cli_ask_rejects_nonpositive_top_k(monkeypatch):
         cli_main()
 
     assert exc_info.value.code == 2
+
+
+def test_system_prompt_requires_citations_and_forbids_fabrication():
+    prompt = qa.SYSTEM_PROMPT.lower()
+    assert "do not fabricate" in prompt
+    assert "line range" in prompt and "cite" in prompt
+
+
+def test_limit_chunks_bounds_context_and_truncates():
+    chunks = [
+        {"text": "a" * 500, "metadata": {"file": "a.py", "start_line": 1, "end_line": 9}},
+        {"text": "b" * 5000, "metadata": {"file": "b.py", "start_line": 1, "end_line": 9}},
+        {"text": "c" * 50, "metadata": {"file": "c.py", "start_line": 1, "end_line": 9}},
+    ]
+    context = qa.format_retrieved_chunks(chunks, max_chars=1000)
+    assert len(context) <= 1000
+    assert "a.py:L1-L9" in context and "[truncated]" in context
+    assert "c.py" not in context
+    assert qa.limit_chunks(chunks, 10) == []
+
+
+def test_ask_question_limits_context_from_config(tmp_path, monkeypatch):
+    repo = _indexed_repo(tmp_path)
+    monkeypatch.setattr(qa, "embed_texts", lambda texts: [[1.0, 0.0]])
+    monkeypatch.setenv("QATOOL_MAX_CONTEXT_CHARS", "150")
+    client = FakeModelClient()
+    qa.ask_question(repo, "find_answer", model_client=client)
+    assert len(client.context) <= 150

@@ -38,6 +38,9 @@ The ask command retrieves up to eight relevant chunks by default. Use
 retrieved context to Claude, returns an answer with source citations, and
 requires `ANTHROPIC_API_KEY`. Set `QATOOL_MODEL` to override the default Claude
 model.
+Prompt context is bounded by `QATOOL_MAX_CONTEXT_CHARS` (default 24000);
+lower-ranked chunks are dropped or truncated to fit. `QATOOL_MAX_OUTPUT_TOKENS`
+(default 1024) caps the answer length.
 
 ## Configuration
 
