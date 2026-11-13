@@ -17,6 +17,8 @@ from typing import Any
 
 DEFAULT_TOP_K = 8
 DEFAULT_LLM_MODEL = "claude-3-5-sonnet-latest"
+DEFAULT_MAX_CONTEXT_CHARS = 24000
+DEFAULT_MAX_OUTPUT_TOKENS = 1024
 DEFAULT_INDEX_PATH = ".qatool/index"
 CONFIG_ENV = "QATOOL_CONFIG"
 CONFIG_FILENAMES = (".qatool/config.json", "qatool.json")
@@ -28,6 +30,8 @@ FILE_KEYS = frozenset(
     {
         "QATOOL_MODEL",
         "QATOOL_TOP_K",
+        "QATOOL_MAX_CONTEXT_CHARS",
+        "QATOOL_MAX_OUTPUT_TOKENS",
         "QATOOL_INDEX_PATH",
         "QATOOL_EMBEDDING_PROVIDER",
         "QATOOL_EMBEDDING_MODEL",
@@ -53,6 +57,8 @@ class Settings:
     llm_model: str
     top_k: int
     index_path: Path
+    max_context_chars: int = DEFAULT_MAX_CONTEXT_CHARS
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
     config_file: Path | None = None
 
 
@@ -115,6 +121,11 @@ def _parse_top_k(raw: str, source: str) -> int:
     return value
 
 
+def _parse_positive(name: str, default: int) -> int:
+    raw = (lookup(name) or "").strip()
+    return _parse_top_k(raw, name) if raw else default
+
+
 def load_settings(repo_root: Path, top_k: int | None = None) -> Settings:
     """Load, validate and activate settings for a repository.
 
@@ -131,6 +142,9 @@ def load_settings(repo_root: Path, top_k: int | None = None) -> Settings:
         top_k = _parse_top_k(raw_top_k, "QATOOL_TOP_K") if raw_top_k else DEFAULT_TOP_K
     elif top_k <= 0:
         raise ConfigError(f"top_k must be positive, got {top_k}")
+
+    max_context_chars = _parse_positive("QATOOL_MAX_CONTEXT_CHARS", DEFAULT_MAX_CONTEXT_CHARS)
+    max_output_tokens = _parse_positive("QATOOL_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS)
 
     llm_model = (lookup("QATOOL_MODEL") or "").strip() or DEFAULT_LLM_MODEL
 
@@ -169,5 +183,7 @@ def load_settings(repo_root: Path, top_k: int | None = None) -> Settings:
         llm_model=llm_model,
         top_k=top_k,
         index_path=index_path,
+        max_context_chars=max_context_chars,
+        max_output_tokens=max_output_tokens,
         config_file=config_file,
     )
