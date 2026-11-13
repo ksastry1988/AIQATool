@@ -728,3 +728,74 @@ def test_reindex_main_persists_commit_sha_for_empty_diff(tmp_path, monkeypatch):
     reindex_main()
 
     assert store.get_indexed_commit_sha() == commit_sha
+
+
+def test_reindex_chunking_failure_names_file_and_preserves_index(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = VectorStore.open(repo / ".qatool" / "index")
+    _seed_indexed_file(repo, store, "good.py", "print('old')\n")
+    (repo / "good.py").write_text("print('new')\n")
+    (repo / "bad.py").write_text("print('bad')\n")
+    store_path = repo / ".qatool" / "index" / "store.json"
+    before = store_path.read_text()
+
+    def chunk(full_path, rel_path):
+        if rel_path == "bad.py":
+            raise ValueError("parse error")
+        return [Chunk(text="x", metadata={"file": rel_path})]
+
+    monkeypatch.setattr("qatool.reindex.chunk_file", chunk)
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    with pytest.raises(RuntimeError, match="failed to chunk bad.py: parse error"):
+        reindex(repo, parse_diff_output("M\tgood.py\nA\tbad.py"), store)
+
+    assert store_path.read_text() == before
+
+
+def test_reindex_logs_per_file_actions(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    store = VectorStore.open(repo / ".qatool" / "index")
+    _seed_indexed_file(repo, store, "same.py", "same\n")
+    _seed_indexed_file(repo, store, "gone.py", "gone\n")
+    (repo / "gone.py").unlink()
+    (repo / "new file.py").write_text("new\n")
+    monkeypatch.setattr(
+        "qatool.reindex.chunk_file",
+        lambda full_path, rel_path: [Chunk(text="n", metadata={"file": rel_path})],
+    )
+    monkeypatch.setattr("qatool.reindex.embed_texts", lambda texts: [[1.0] for _ in texts])
+
+    reindex(repo, parse_diff_output("M\tsame.py\nD\tgone.py\nA\tnew file.py"), store)
+
+    out = capsys.readouterr().out
+    assert "removing gone.py" in out
+    assert "reindexing new file.py" in out
+    assert "skipped 1 unchanged file(s)" in out
+
+
+def test_vector_store_reports_corrupt_index_with_recovery_hint(tmp_path):
+    index_dir = tmp_path / "index"
+    index_dir.mkdir()
+    (index_dir / "store.json").write_text("{not json")
+
+    with pytest.raises(ValueError, match="corrupt.*qatool index"):
+        VectorStore.open(index_dir)
+
+
+def test_vector_store_persist_failure_leaves_no_temp_files(tmp_path, monkeypatch):
+    store = VectorStore.open(tmp_path / "index")
+    store.set_file_hash("a.py", "h1")
+
+    def boom(self, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", boom)
+    with pytest.raises(OSError):
+        store.set_file_hash("b.py", "h2")
+    monkeypatch.undo()
+
+    assert list((tmp_path / "index").glob("*.tmp")) == []
+    assert VectorStore.open(tmp_path / "index").get_file_hash("b.py") is None

@@ -452,3 +452,53 @@ def test_cli_index_rejects_missing_repository_without_creating_store(
     assert exc_info.value.code == 2
     assert f"repository does not exist: {missing_repo}" in capsys.readouterr().err
     assert not missing_repo.exists()
+
+
+def test_index_repository_batches_store_writes(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for name in ("a.py", "b.py", "c.py"):
+        (repo / name).write_text(f"def {name[0]}():\n    return 1\n")
+
+    monkeypatch.setattr("qatool.indexing.embed_texts", lambda texts: [[1.0] for _ in texts])
+    store = VectorStore.open(repo / ".qatool" / "index")
+    index_repository(repo, store)
+
+    (repo / "a.py").unlink()
+    (repo / "b.py").unlink()
+    writes = []
+    original = store.apply_file_changes
+
+    def counting(replacements, deletions, *args, **kwargs):
+        writes.append((len(replacements), set(deletions)))
+        return original(replacements, deletions, *args, **kwargs)
+
+    monkeypatch.setattr(store, "apply_file_changes", counting)
+    monkeypatch.setattr(
+        store, "delete_by_file", lambda *_: pytest.fail("deletes must be batched")
+    )
+    index_repository(repo, store)
+
+    assert writes == [(0, {"a.py", "b.py"})]
+    assert store.list_indexed_files() == {"c.py"}
+
+
+def test_index_repository_batch_write_failure_leaves_index_unchanged(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def a():\n    return 1\n")
+    (repo / "b.py").write_text("def b():\n    return 1\n")
+
+    monkeypatch.setattr("qatool.indexing.embed_texts", lambda texts: [[1.0] for _ in texts])
+    store = VectorStore.open(repo / ".qatool" / "index")
+
+    def failing(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(store, "apply_file_changes", failing)
+    index_repository(repo, store)
+
+    err = capsys.readouterr().err
+    assert "a.py: failed to index file (disk full)" in err
+    assert "b.py: failed to index file (disk full)" in err
+    assert VectorStore.open(repo / ".qatool" / "index").list_indexed_files() == set()

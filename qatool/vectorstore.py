@@ -57,27 +57,38 @@ class VectorStore:
         if not self._store_path.exists():
             return
 
-        raw = json.loads(self._store_path.read_text())
+        try:
+            raw = json.loads(self._store_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"index file {self._store_path} is corrupt ({exc}); "
+                "delete it and run `qatool index <repo>` to rebuild"
+            ) from exc
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"index file {self._store_path} is corrupt (unexpected structure); "
+                "delete it and run `qatool index <repo>` to rebuild"
+            )
         self._data["file_hashes"] = dict(raw.get("file_hashes", {}))
         self._data["chunks"] = list(raw.get("chunks", []))
         self._data["indexed_commit_sha"] = raw.get("indexed_commit_sha")
 
     def _persist(self) -> None:
         tmp_path: Path | None = None
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.path,
-            prefix=f"{self._store_path.stem}-",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp_file:
-            tmp_file.write(json.dumps(self._data, indent=2, sort_keys=True))
-            tmp_path = Path(tmp_file.name)
         try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.path,
+                prefix=f"{self._store_path.stem}-",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp_file:
+                tmp_path = Path(tmp_file.name)
+                tmp_file.write(json.dumps(self._data, indent=2, sort_keys=True))
             tmp_path.replace(self._store_path)
         except Exception:
-            if tmp_path.exists():
+            if tmp_path is not None and tmp_path.exists():
                 tmp_path.unlink()
             raise
 
