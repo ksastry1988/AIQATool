@@ -7,6 +7,13 @@ questions about it ("where does rate limiting happen", "trace how a
 request flows through auth"), answered by Claude grounded in
 retrieved, language-aware code chunks.
 
+## Demo
+
+- [Index](assets/QATool_Index.mov): running `qatool index` on a repository
+  to chunk, embed and store it in the local index.
+- [Ask](assets/QATool_Ask.mov): running `qatool ask` to answer a question
+  about the indexed code, with `file:Lstart-Lend` source references.
+
 ## Quickstart
 
 1. **Install** (Python 3.10+):
