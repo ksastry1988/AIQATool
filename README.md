@@ -154,7 +154,7 @@ variable names below (API keys are rejected in the file; use the environment).
 | Setting | Default | Description |
 | --- | --- | --- |
 | `QATOOL_CONFIG` | unset | Path to a config file (environment only) |
-| `QATOOL_MODEL` | `claude-3-5-sonnet-latest` | Claude model for `ask` |
+| `QATOOL_MODEL` | `claude-opus-5-5` | Claude model for `ask` |
 | `QATOOL_TOP_K` | `8` | Chunks retrieved by `ask` (`--top-k` overrides) |
 | `QATOOL_INDEX_PATH` | `.qatool/index` | Vector store directory; relative paths are under the repo. Must be under `.qatool` or outside the repo (otherwise rejected) |
 | `QATOOL_EMBEDDING_PROVIDER` | `mock` | `mock` or `voyage` |

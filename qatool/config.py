@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_TOP_K = 8
-DEFAULT_LLM_MODEL = "claude-3-5-sonnet-latest"
+DEFAULT_LLM_MODEL = "claude-opus-5-5"
 DEFAULT_MAX_CONTEXT_CHARS = 24000
 DEFAULT_MAX_OUTPUT_TOKENS = 1024
 DEFAULT_INDEX_PATH = ".qatool/index"
