@@ -7,40 +7,133 @@ questions about it ("where does rate limiting happen", "trace how a
 request flows through auth"), answered by Claude grounded in
 retrieved, language-aware code chunks.
 
-## Status
+## Quickstart
 
-Skeleton / work in progress. Some core pieces are still stubbed with `TODO`s:
+1. **Install** (Python 3.10+):
 
-- `qatool/chunking.py` — tree-sitter based, function/class-level chunking
-  (implemented for Python, JavaScript, TypeScript, Go, Java, Rust, C/C++;
-  other files are indexed as whole-file chunks)
-- `qatool/embeddings.py` — embedding provider (Voyage AI recommended)
-- `qatool/vectorstore.py` — implemented persistent local vector store
-- `qatool/cli.py` — `index`, `ask`, and `reindex` commands
-- `qatool/reindex.py` — incremental re-indexing (implemented), used by
-  the git hook below
+   ```bash
+   git clone https://github.com/ksastry1988/AIQATool.git
+   cd AIQATool
+   pip install -e .
+   qatool --help
+   ```
 
-## Setup
+   A Docker image is also available (see [Docker](#docker)).
+
+2. **Set credentials** (see [Provider credentials](#provider-credentials)):
+
+   ```bash
+   export ANTHROPIC_API_KEY=...            # answers (required for `ask`)
+   export QATOOL_EMBEDDING_PROVIDER=voyage # real embeddings
+   export VOYAGE_API_KEY=...
+   ```
+
+3. **Index the repository** (full index, see [Full indexing](#full-indexing)):
+
+   ```bash
+   qatool index /path/to/repo
+   ```
+
+4. **Enable the post-commit hook** so the index stays fresh (see
+   [Incremental re-indexing on commit](#incremental-re-indexing-on-commit)):
+
+   ```bash
+   cd /path/to/repo
+   mkdir -p .githooks && cp /path/to/AIQATool/.githooks/post-commit .githooks/
+   chmod +x .githooks/post-commit
+   git config core.hooksPath .githooks
+   ```
+
+5. **Ask a question** (see [Asking questions](#asking-questions)):
+
+   ```bash
+   qatool ask --repo /path/to/repo "where does authentication happen"
+   ```
+
+## Provider credentials
+
+qatool uses two providers. Credentials are read **only from environment
+variables** (they are rejected in the config file and never printed).
+
+| Purpose | Provider | Variables |
+| --- | --- | --- |
+| Answers (`ask`) | Anthropic Claude | `ANTHROPIC_API_KEY` (required); `QATOOL_MODEL` optional |
+| Embeddings (`index`, `reindex`, `ask`) | `voyage` (recommended) | `QATOOL_EMBEDDING_PROVIDER=voyage` and `VOYAGE_API_KEY` (or `QATOOL_EMBEDDING_API_KEY`) |
+| Embeddings (offline/testing) | `mock` (default) | none |
+
+> **Important:** the default `mock` embedding provider produces
+> deterministic placeholder vectors, not semantic ones, so retrieval quality
+> is poor. Use `voyage` for real use. Use the same provider and model for
+> `index`, `reindex`, and `ask`; if you change them, re-run `qatool index`.
+
+## Full indexing
 
 ```bash
-pip install -e .
+qatool index /path/to/repo
 ```
 
-## Usage
+Walks the repository, chunks supported files, embeds them, and stores the
+result in the [local index](#local-index-location). Files excluded by the
+default rules or `.qatoolignore` are skipped (see
+[Ignoring files](#ignoring-files)), as are binary files. Re-running `index`
+is safe: unchanged files (by content hash) are skipped, changed files are
+re-embedded, and files that were deleted or became ignored are removed. It
+prints a summary of scanned, indexed, unchanged, and removed files, and
+reports per-file errors. The path must be an existing directory.
+
+## Asking questions
 
 ```bash
-qatool index ./path-to-repo
-qatool ask --repo ./path-to-repo "where does authentication happen"
+qatool ask --repo /path/to/repo "where does rate limiting happen"
+qatool ask --repo /path/to/repo --top-k 12 "trace a request through auth"
 ```
 
-The ask command retrieves up to eight relevant chunks by default. Use
-`--top-k` to change the number of retrieved chunks. It sends the question and
-retrieved context to Claude, returns an answer with source citations, and
-requires `ANTHROPIC_API_KEY`. Set `QATOOL_MODEL` to override the default Claude
-model.
+`--repo` defaults to the current directory, which must already be indexed.
+The command retrieves the most relevant chunks (up to eight by default; use
+`--top-k` or `QATOOL_TOP_K`), sends the question and context to Claude, and
+prints an answer with source citations (file and line range). It requires
+`ANTHROPIC_API_KEY`. Set `QATOOL_MODEL` to override the default Claude model.
 Prompt context is bounded by `QATOOL_MAX_CONTEXT_CHARS` (default 24000);
 lower-ranked chunks are dropped or truncated to fit. `QATOOL_MAX_OUTPUT_TOKENS`
 (default 1024) caps the answer length.
+
+## Local index location
+
+The index is stored locally in `<repo>/.qatool/index/store.json` (override
+with `QATOOL_INDEX_PATH`, which must be under `.qatool` or outside the repo).
+It is created by `qatool index`, never uploaded by qatool itself (chunk text
+is sent to the embedding provider while indexing, and retrieved chunks are
+sent to Claude when asking). Add `.qatool/` to your repository's
+`.gitignore`. To start over, delete the `.qatool/index` directory and run
+`qatool index` again.
+
+## Supported languages and limitations
+
+Function/class-level chunking (tree-sitter) is supported for these
+extensions:
+
+| Language | Extensions |
+| --- | --- |
+| Python | `.py`, `.pyi` |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` |
+| TypeScript | `.ts`, `.mts`, `.cts`, `.tsx` |
+| Go | `.go` |
+| Java | `.java` |
+| Rust | `.rs` |
+| C / C++ | `.c`, `.h`, `.cc`, `.cpp`, `.cxx`, `.hh`, `.hpp`, `.hxx` |
+
+Limitations:
+
+- Other text files (Markdown, YAML, JSON, other languages, ...) are indexed
+  as a single whole-file chunk, which may be less precise for large files.
+- Large definitions are split into chunks of at most 80 lines.
+- Binary files, secret-like files, and generated files are never indexed.
+- The index is local to one checkout; there is no shared or remote index.
+- Answers are only as good as the retrieved chunks and depend on Claude;
+  verify cited sources for important decisions.
+- The default `mock` embedding provider is not semantic (see
+  [Provider credentials](#provider-credentials)).
+- `reindex` fails if no index exists yet; run `qatool index` first.
 
 ## Configuration
 
@@ -96,12 +189,23 @@ index data should be stored in the mounted repository's `.qatool` directory.
 ## Incremental re-indexing on commit
 
 Initialize the local index first, then enable the included git hook so it
-stays fresh automatically:
+stays fresh automatically. Inside this repository the hook is already at
+`.githooks/post-commit`; for another repository, copy it there first:
 
 ```bash
 qatool index /path/to/repo
+cd /path/to/repo
+mkdir -p .githooks && cp /path/to/AIQATool/.githooks/post-commit .githooks/
+chmod +x .githooks/post-commit
 git config core.hooksPath .githooks
 ```
+
+The `qatool` command must be on `PATH` when git runs the hook (for example
+install it in the environment your git client uses). The hook is
+per-clone: each collaborator runs `git config core.hooksPath .githooks`.
+You can also reindex manually with
+`qatool reindex --repo /path/to/repo --changed-files <file>`, where the file
+holds NUL-separated `git diff --name-status -z` output.
 
 This runs `.githooks/post-commit` after every commit/merge, which
 diffs the changed files and re-embeds only those (see
